@@ -1,0 +1,44 @@
+{
+  "tables": {
+    "users": {
+      "columns": {
+        "id": { "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+        "username": { "type": "TEXT", "notNull": true, "unique": true },
+        "password_hash": { "type": "TEXT", "notNull": true }
+      }
+    },
+    "boards": {
+      "columns": {
+        "id": { "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+        "user_id": { "type": "INTEGER", "notNull": true, "references": "users(id)" },
+        "name": { "type": "TEXT", "notNull": true, "default": "'My Board'" }
+      },
+      "indexes": {
+        "idx_boards_user_id": ["user_id"]
+      }
+    },
+    "columns": {
+      "columns": {
+        "id": { "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+        "board_id": { "type": "INTEGER", "notNull": true, "references": "boards(id)" },
+        "title": { "type": "TEXT", "notNull": true },
+        "position": { "type": "INTEGER", "notNull": true }
+      },
+      "indexes": {
+        "idx_columns_board_id": ["board_id"]
+      }
+    },
+    "cards": {
+      "columns": {
+        "id": { "type": "INTEGER", "primaryKey": true, "autoIncrement": true },
+        "column_id": { "type": "INTEGER", "notNull": true, "references": "columns(id)" },
+        "title": { "type": "TEXT", "notNull": true },
+        "details": { "type": "TEXT", "notNull": true, "default": "''" },
+        "position": { "type": "INTEGER", "notNull": true }
+      },
+      "indexes": {
+        "idx_cards_column_id": ["column_id"]
+      }
+    }
+  }
+}
