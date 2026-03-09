@@ -16,7 +16,8 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db():
     conn = get_conn()
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
@@ -43,7 +44,8 @@ def init_db():
             position INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_cards_column_id ON cards(column_id);
-    """)
+    """
+    )
     conn.close()
 
 
@@ -69,9 +71,7 @@ def ensure_board(user_id: int) -> int:
     if row:
         board_id = row["id"]
     else:
-        cur = conn.execute(
-            "INSERT INTO boards (user_id, name) VALUES (?, 'My Board')", (user_id,)
-        )
+        cur = conn.execute("INSERT INTO boards (user_id, name) VALUES (?, 'My Board')", (user_id,))
         board_id = cur.lastrowid
         for i, title in enumerate(DEFAULT_COLUMNS):
             conn.execute(
@@ -86,22 +86,47 @@ def ensure_board(user_id: int) -> int:
 def get_board(user_id: int) -> dict:
     board_id = ensure_board(user_id)
     conn = get_conn()
-    cols = conn.execute(
-        "SELECT id, title, position FROM columns WHERE board_id = ? ORDER BY position",
+    rows = conn.execute(
+        """
+        SELECT
+            co.id AS column_id,
+            co.title AS column_title,
+            co.position AS column_position,
+            ca.id AS card_id,
+            ca.title AS card_title,
+            ca.details AS card_details,
+            ca.position AS card_position
+        FROM columns co
+        LEFT JOIN cards ca ON ca.column_id = co.id
+        WHERE co.board_id = ?
+        ORDER BY co.position, ca.position
+        """,
         (board_id,),
     ).fetchall()
-    columns = []
-    for col in cols:
-        cards = conn.execute(
-            "SELECT id, title, details, position FROM cards WHERE column_id = ? ORDER BY position",
-            (col["id"],),
-        ).fetchall()
-        columns.append({
-            "id": col["id"],
-            "title": col["title"],
-            "position": col["position"],
-            "cards": [{"id": c["id"], "title": c["title"], "details": c["details"]} for c in cards],
-        })
+
+    columns: list[dict] = []
+    by_column_id: dict[int, dict] = {}
+    for row in rows:
+        column_id = row["column_id"]
+        if column_id not in by_column_id:
+            col = {
+                "id": column_id,
+                "title": row["column_title"],
+                "position": row["column_position"],
+                "cards": [],
+            }
+            by_column_id[column_id] = col
+            columns.append(col)
+
+        if row["card_id"] is not None:
+            by_column_id[column_id]["cards"].append(
+                {
+                    "id": row["card_id"],
+                    "title": row["card_title"],
+                    "details": row["card_details"],
+                }
+            )
+
     conn.close()
     return {"id": board_id, "columns": columns}
 
@@ -182,6 +207,9 @@ def delete_card(card_id: int, user_id: int) -> bool:
 
 
 def move_card(card_id: int, target_column_id: int, position: int, user_id: int) -> bool:
+    if position < 0:
+        raise ValueError("Position must be >= 0")
+
     conn = get_conn()
     card = conn.execute(
         "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?",
@@ -190,6 +218,7 @@ def move_card(card_id: int, target_column_id: int, position: int, user_id: int) 
     if not card:
         conn.close()
         return False
+
     target_col = conn.execute(
         "SELECT co.id FROM columns co JOIN boards b ON co.board_id = b.id WHERE co.id = ? AND b.user_id = ?",
         (target_column_id, user_id),
@@ -201,20 +230,28 @@ def move_card(card_id: int, target_column_id: int, position: int, user_id: int) 
     old_col_id = card["column_id"]
     old_pos = card["position"]
 
-    # Remove from old position
+    target_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM cards WHERE column_id = ?",
+        (target_column_id,),
+    ).fetchone()["c"]
+
+    if target_column_id == old_col_id:
+        target_count -= 1
+
+    normalized_pos = min(position, target_count)
+
     conn.execute(
         "UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ?",
         (old_col_id, old_pos),
     )
-    # Make space in target column
+
     conn.execute(
         "UPDATE cards SET position = position + 1 WHERE column_id = ? AND position >= ?",
-        (target_column_id, position),
+        (target_column_id, normalized_pos),
     )
-    # Move the card
     conn.execute(
         "UPDATE cards SET column_id = ?, position = ? WHERE id = ?",
-        (target_column_id, position, card_id),
+        (target_column_id, normalized_pos, card_id),
     )
     conn.commit()
     conn.close()

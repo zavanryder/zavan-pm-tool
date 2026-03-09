@@ -1,23 +1,27 @@
-from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from auth import router as auth_router, get_current_user, USERS
-from database import init_db, ensure_user, get_board, rename_column, create_card, update_card, delete_card, move_card
+from auth import USERS, get_current_user, router as auth_router
+from database import (
+    create_card,
+    delete_card,
+    ensure_user,
+    get_board,
+    init_db,
+    move_card,
+    rename_column,
+    update_card,
+)
 
+init_db()
+for username, password in USERS.items():
+    ensure_user(username, password)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    for username, password in USERS.items():
-        ensure_user(username, password)
-    yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 app.include_router(auth_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -88,38 +92,91 @@ class MoveCardRequest(BaseModel):
 
 @app.put("/api/cards/{card_id}/move")
 def api_move_card(card_id: int, req: MoveCardRequest, user_id: int = Depends(get_user_id)):
-    if not move_card(card_id, req.target_column_id, req.position, user_id):
+    if req.position < 0:
+        raise HTTPException(status_code=400, detail="Position must be >= 0")
+    try:
+        moved = move_card(card_id, req.target_column_id, req.position, user_id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    if not moved:
         raise HTTPException(status_code=404, detail="Card or column not found")
     return {"ok": True}
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
-    conversation_history: list[dict] = []
+    conversation_history: list[ChatMessage] = Field(default_factory=list)
+
+
+class AddCardUpdate(BaseModel):
+    action: Literal["add_card"]
+    column_id: int
+    title: str
+    details: str = ""
+
+
+class UpdateCardUpdate(BaseModel):
+    action: Literal["update_card"]
+    card_id: int
+    title: str | None = None
+    details: str | None = None
+
+
+class MoveCardUpdate(BaseModel):
+    action: Literal["move_card"]
+    card_id: int
+    target_column_id: int
+    position: int
+
+
+class DeleteCardUpdate(BaseModel):
+    action: Literal["delete_card"]
+    card_id: int
+
+
+BoardUpdate = AddCardUpdate | UpdateCardUpdate | MoveCardUpdate | DeleteCardUpdate
+BOARD_UPDATE_ADAPTER = TypeAdapter(list[BoardUpdate])
 
 
 @app.post("/api/ai/chat")
 def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
-    from ai import chat, build_messages, parse_response
+    from ai import build_messages, chat, parse_response
 
     board = get_board(user_id)
-    messages = build_messages(board, req.message, req.conversation_history)
+    history = [item.model_dump() for item in req.conversation_history]
+    messages = build_messages(board, req.message, history)
     raw = chat(messages)
     result = parse_response(raw)
 
-    for update in result.get("board_updates", []):
-        action = update.get("action")
-        if action == "add_card":
-            create_card(update["column_id"], update["title"], update.get("details", ""), user_id)
-        elif action == "update_card":
-            update_card(update["card_id"], update.get("title"), update.get("details"), user_id)
-        elif action == "move_card":
-            move_card(update["card_id"], update["target_column_id"], update.get("position", 0), user_id)
-        elif action == "delete_card":
-            delete_card(update["card_id"], user_id)
+    try:
+        updates = BOARD_UPDATE_ADAPTER.validate_python(result.get("board_updates", []))
+    except ValidationError as err:
+        raise HTTPException(status_code=502, detail="Invalid AI board update payload") from err
+
+    for update in updates:
+        if isinstance(update, AddCardUpdate):
+            create_card(update.column_id, update.title, update.details, user_id)
+        elif isinstance(update, UpdateCardUpdate):
+            update_card(update.card_id, update.title, update.details, user_id)
+        elif isinstance(update, MoveCardUpdate):
+            try:
+                move_card(update.card_id, update.target_column_id, update.position, user_id)
+            except ValueError:
+                continue
+        elif isinstance(update, DeleteCardUpdate):
+            delete_card(update.card_id, user_id)
 
     updated_board = get_board(user_id)
-    return {"message": result["message"], "board_updates": result["board_updates"], "board": updated_board}
+    return {
+        "message": result["message"],
+        "board_updates": [update.model_dump() for update in updates],
+        "board": updated_board,
+    }
 
 
 if STATIC_DIR.is_dir():

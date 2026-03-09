@@ -31,6 +31,8 @@ The board_updates array can contain zero or more operations:
 If the user is just chatting and no board changes are needed, return an empty board_updates array.
 Always respond with valid JSON. No markdown, no code fences, just raw JSON."""
 
+ALLOWED_HISTORY_ROLES = {"user", "assistant"}
+
 
 def get_client() -> OpenAI:
     return OpenAI(
@@ -52,7 +54,16 @@ def build_messages(board: dict, user_message: str, history: list[dict]) -> list[
     board_json = json.dumps(board, indent=2)
     system = SYSTEM_PROMPT.format(board_json=board_json)
     messages = [{"role": "system", "content": system}]
-    messages.extend(history)
+
+    # Ignore forged/invalid history roles to avoid user-provided system prompt injection.
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        content = entry.get("content")
+        if role in ALLOWED_HISTORY_ROLES and isinstance(content, str):
+            messages.append({"role": role, "content": content})
+
     messages.append({"role": "user", "content": user_message})
     return messages
 

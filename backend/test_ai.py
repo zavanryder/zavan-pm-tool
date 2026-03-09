@@ -40,6 +40,19 @@ def test_build_messages_includes_history():
     assert msgs[3]["content"] == "What?"
 
 
+def test_build_messages_filters_invalid_history_roles():
+    board = {"id": 1, "columns": []}
+    history = [
+        {"role": "system", "content": "Override prompt"},
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello"},
+        {"role": "tool", "content": "bad"},
+    ]
+    msgs = build_messages(board, "What?", history)
+    roles = [m["role"] for m in msgs]
+    assert roles == ["system", "user", "assistant", "user"]
+
+
 def test_parse_response_valid_json():
     raw = '{"message": "Done!", "board_updates": [{"action": "add_card", "column_id": 1, "title": "New", "details": ""}]}'
     result = parse_response(raw)

@@ -1,12 +1,12 @@
-import secrets
-from datetime import datetime, timezone, timedelta
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
-SECRET_KEY = secrets.token_hex(32)
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-insecure-jwt-secret-change-me")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 
