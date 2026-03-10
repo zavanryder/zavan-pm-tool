@@ -23,8 +23,10 @@ vi.mock("@/lib/api", () => ({
   createCard: vi.fn(() => Promise.resolve({ id: 99, title: "New", details: "" })),
   deleteCard: vi.fn(() => Promise.resolve({ ok: true })),
   moveCard: vi.fn(() => Promise.resolve({ ok: true })),
+  updateCard: vi.fn(() => Promise.resolve({ ok: true })),
   setToken: vi.fn(),
   getToken: vi.fn(),
+  setAuthErrorHandler: vi.fn(),
 }));
 
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
@@ -37,7 +39,7 @@ describe("KanbanBoard", () => {
     });
   });
 
-  it("renames a column", async () => {
+  it("renames a column on blur", async () => {
     render(<KanbanBoard username="user" onLogout={() => {}} />);
     await waitFor(() => screen.getAllByTestId(/column-/i));
     const column = getFirstColumn();

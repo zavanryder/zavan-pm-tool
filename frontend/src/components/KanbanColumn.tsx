@@ -1,7 +1,8 @@
+import { useState } from "react";
 import clsx from "clsx";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Card, Column } from "@/lib/kanban";
+import type { Column } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
 
@@ -10,6 +11,7 @@ type KanbanColumnProps = {
   onRename: (columnId: number, title: string) => void;
   onAddCard: (columnId: number, title: string, details: string) => void;
   onDeleteCard: (columnId: number, cardId: number) => void;
+  onUpdateCard: (cardId: number, title: string, details: string) => void;
 };
 
 export const KanbanColumn = ({
@@ -17,8 +19,25 @@ export const KanbanColumn = ({
   onRename,
   onAddCard,
   onDeleteCard,
+  onUpdateCard,
 }: KanbanColumnProps) => {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const [localTitle, setLocalTitle] = useState(column.title);
+
+  const commitRename = () => {
+    const trimmed = localTitle.trim();
+    if (trimmed && trimmed !== column.title) {
+      onRename(column.id, trimmed);
+    } else {
+      setLocalTitle(column.title);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      (e.target as HTMLInputElement).blur();
+    }
+  };
 
   return (
     <section
@@ -38,8 +57,10 @@ export const KanbanColumn = ({
             </span>
           </div>
           <input
-            value={column.title}
-            onChange={(event) => onRename(column.id, event.target.value)}
+            value={localTitle}
+            onChange={(e) => setLocalTitle(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={handleKeyDown}
             className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
             aria-label="Column title"
           />
@@ -52,6 +73,7 @@ export const KanbanColumn = ({
               key={card.id}
               card={card}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
+              onUpdate={onUpdateCard}
             />
           ))}
         </SortableContext>

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -17,18 +18,30 @@ from database import (
     update_card,
 )
 
-init_db()
-for username, password in USERS.items():
-    ensure_user(username, password)
+# Cache user_id per username to avoid a DB query on every request
+_user_id_cache: dict[str, int] = {}
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_db()
+    for username, password in USERS.items():
+        _user_id_cache[username] = ensure_user(username, password)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.include_router(auth_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
 def get_user_id(username: str = Depends(get_current_user)) -> int:
-    return ensure_user(username, USERS[username])
+    if username in _user_id_cache:
+        return _user_id_cache[username]
+    uid = ensure_user(username, USERS[username])
+    _user_id_cache[username] = uid
+    return uid
 
 
 @app.get("/api/health")
@@ -150,7 +163,12 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
     board = get_board(user_id)
     history = [item.model_dump() for item in req.conversation_history]
     messages = build_messages(board, req.message, history)
-    raw = chat(messages)
+
+    try:
+        raw = chat(messages)
+    except Exception:
+        raise HTTPException(status_code=502, detail="AI service unavailable")
+
     result = parse_response(raw)
 
     try:
@@ -158,6 +176,7 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
     except ValidationError as err:
         raise HTTPException(status_code=502, detail="Invalid AI board update payload") from err
 
+    errors: list[str] = []
     for update in updates:
         if isinstance(update, AddCardUpdate):
             create_card(update.column_id, update.title, update.details, user_id)
@@ -166,14 +185,18 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
         elif isinstance(update, MoveCardUpdate):
             try:
                 move_card(update.card_id, update.target_column_id, update.position, user_id)
-            except ValueError:
-                continue
+            except ValueError as e:
+                errors.append(str(e))
         elif isinstance(update, DeleteCardUpdate):
             delete_card(update.card_id, user_id)
 
+    message = result["message"]
+    if errors:
+        message += "\n\n(Some operations failed: " + "; ".join(errors) + ")"
+
     updated_board = get_board(user_id)
     return {
-        "message": result["message"],
+        "message": message,
         "board_updates": [update.model_dump() for update in updates],
         "board": updated_board,
     }

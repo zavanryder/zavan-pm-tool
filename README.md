@@ -1,6 +1,6 @@
 # Kanban Studio
 
-A single-board Kanban app with drag-and-drop cards and an AI chat assistant that can create, move, and update cards via natural language.
+A single-board Kanban app with drag-and-drop cards, inline card editing, and an AI chat assistant that can create, move, and update cards via natural language.
 
 ## Requirements
 
@@ -64,16 +64,21 @@ Backend:
 
 ```bash
 cd backend
-uv sync --no-install-project
-uv run --no-project pytest -v
+.venv/bin/pytest -v
 ```
 
 Frontend:
 
 ```bash
 cd frontend
-npm install
 npm test
+```
+
+If the backend venv doesn't exist yet, create it first:
+
+```bash
+cd backend
+uv sync --no-install-project
 ```
 
 ## Stack

@@ -10,15 +10,28 @@ export function getToken(): string | null {
   return token;
 }
 
+let onAuthError: (() => void) | null = null;
+
+export function setAuthErrorHandler(handler: () => void) {
+  onAuthError = handler;
+}
+
 export async function apiFetch(path: string, options: RequestInit = {}) {
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
+  if (options.body) {
+    headers["Content-Type"] = "application/json";
+  }
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401) {
+    token = null;
+    onAuthError?.();
+    throw new Error("Session expired");
+  }
   if (!res.ok) {
     throw new Error(`API error: ${res.status}`);
   }

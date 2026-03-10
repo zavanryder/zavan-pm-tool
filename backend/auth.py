@@ -6,7 +6,7 @@ import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dev-insecure-jwt-secret-change-me")
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or os.urandom(32).hex()
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 

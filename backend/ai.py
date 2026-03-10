@@ -35,9 +35,13 @@ ALLOWED_HISTORY_ROLES = {"user", "assistant"}
 
 
 def get_client() -> OpenAI:
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        api_key=api_key,
+        timeout=60.0,
     )
 
 
