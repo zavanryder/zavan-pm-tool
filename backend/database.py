@@ -22,7 +22,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL
+                password TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS boards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,7 +58,7 @@ def ensure_user(username: str, password: str) -> int:
         if row:
             return row["id"]
         cur = conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            "INSERT INTO users (username, password) VALUES (?, ?)",
             (username, password),
         )
         user_id = cur.lastrowid

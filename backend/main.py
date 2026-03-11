@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -5,6 +6,8 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+
+logger = logging.getLogger(__name__)
 
 from auth import USERS, get_current_user, router as auth_router
 from database import (
@@ -166,8 +169,9 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
 
     try:
         raw = chat(messages)
-    except Exception:
-        raise HTTPException(status_code=502, detail="AI service unavailable")
+    except Exception as exc:
+        logger.exception("AI chat request failed")
+        raise HTTPException(status_code=502, detail="AI service unavailable") from exc
 
     result = parse_response(raw)
 
@@ -190,16 +194,15 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
         elif isinstance(update, DeleteCardUpdate):
             delete_card(update.card_id, user_id)
 
-    message = result["message"]
-    if errors:
-        message += "\n\n(Some operations failed: " + "; ".join(errors) + ")"
-
     updated_board = get_board(user_id)
-    return {
-        "message": message,
+    response = {
+        "message": result["message"],
         "board_updates": [update.model_dump() for update in updates],
         "board": updated_board,
     }
+    if errors:
+        response["errors"] = errors
+    return response
 
 
 if STATIC_DIR.is_dir():
