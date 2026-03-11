@@ -3,12 +3,15 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import type { Card } from "@/lib/kanban";
+import { LABEL_COLORS } from "@/lib/kanban";
 
 type KanbanCardProps = {
   card: Card;
   onDelete: (cardId: number) => void;
-  onUpdate: (cardId: number, title: string, details: string) => void;
+  onUpdate: (cardId: number, title: string, details: string, label?: string, dueDate?: string | null) => void;
 };
+
+const LABELS = ["", "bug", "feature", "improvement", "task", "docs"];
 
 export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
@@ -16,6 +19,8 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(card.title);
   const [editDetails, setEditDetails] = useState(card.details);
+  const [editLabel, setEditLabel] = useState(card.label);
+  const [editDueDate, setEditDueDate] = useState(card.due_date || "");
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -25,7 +30,7 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
   const handleSave = () => {
     const trimmed = editTitle.trim();
     if (trimmed) {
-      onUpdate(card.id, trimmed, editDetails);
+      onUpdate(card.id, trimmed, editDetails, editLabel, editDueDate || null);
     }
     setEditing(false);
   };
@@ -33,8 +38,12 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
   const handleCancel = () => {
     setEditTitle(card.title);
     setEditDetails(card.details);
+    setEditLabel(card.label);
+    setEditDueDate(card.due_date || "");
     setEditing(false);
   };
+
+  const isOverdue = card.due_date && new Date(card.due_date) < new Date(new Date().toISOString().split("T")[0]);
 
   return (
     <article
@@ -81,6 +90,25 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
               aria-label="Edit card details"
             />
             <div className="mt-2 flex gap-2">
+              <select
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+                className="rounded border border-[var(--stroke)] px-2 py-1 text-xs text-[var(--gray-text)] outline-none"
+                aria-label="Card label"
+              >
+                {LABELS.map((l) => (
+                  <option key={l} value={l}>{l || "No label"}</option>
+                ))}
+              </select>
+              <input
+                type="date"
+                value={editDueDate}
+                onChange={(e) => setEditDueDate(e.target.value)}
+                className="rounded border border-[var(--stroke)] px-2 py-1 text-xs text-[var(--gray-text)] outline-none"
+                aria-label="Due date"
+              />
+            </div>
+            <div className="mt-2 flex gap-2">
               <button
                 type="button"
                 onClick={handleSave}
@@ -103,9 +131,33 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
             onClick={() => {
               setEditTitle(card.title);
               setEditDetails(card.details);
+              setEditLabel(card.label);
+              setEditDueDate(card.due_date || "");
               setEditing(true);
             }}
           >
+            <div className="flex items-center gap-2">
+              {card.label && (
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white"
+                  style={{ backgroundColor: LABEL_COLORS[card.label] || "#888888" }}
+                  data-testid={`card-label-${card.id}`}
+                >
+                  {card.label}
+                </span>
+              )}
+              {card.due_date && (
+                <span
+                  className={clsx(
+                    "text-[10px] font-semibold",
+                    isOverdue ? "text-red-600" : "text-[var(--gray-text)]"
+                  )}
+                  data-testid={`card-due-${card.id}`}
+                >
+                  {card.due_date}
+                </span>
+              )}
+            </div>
             <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
               {card.title}
             </h4>

@@ -33,7 +33,8 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
     throw new Error("Session expired");
   }
   if (!res.ok) {
-    throw new Error(`API error: ${res.status}`);
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `API error: ${res.status}`);
   }
   return res.json();
 }
@@ -47,10 +48,50 @@ export async function login(username: string, password: string) {
   return data;
 }
 
-export async function fetchBoard() {
+export async function register(username: string, password: string, displayName: string = "") {
+  const data = await apiFetch("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ username, password, display_name: displayName }),
+  });
+  token = data.token;
+  return data;
+}
+
+export async function fetchMe() {
+  return apiFetch("/auth/me");
+}
+
+// Board CRUD
+export async function listBoards() {
+  return apiFetch("/boards");
+}
+
+export async function createBoard(name: string) {
+  return apiFetch("/boards", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function fetchBoard(boardId?: number) {
+  if (boardId) {
+    return apiFetch(`/boards/${boardId}`);
+  }
   return apiFetch("/board");
 }
 
+export async function renameBoard(boardId: number, name: string) {
+  return apiFetch(`/boards/${boardId}`, {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteBoard(boardId: number) {
+  return apiFetch(`/boards/${boardId}`, { method: "DELETE" });
+}
+
+// Column management
 export async function renameColumn(columnId: number, title: string) {
   return apiFetch(`/columns/${columnId}`, {
     method: "PUT",
@@ -58,14 +99,35 @@ export async function renameColumn(columnId: number, title: string) {
   });
 }
 
-export async function createCard(columnId: number, title: string, details: string) {
-  return apiFetch("/cards", {
+export async function addColumn(boardId: number, title: string) {
+  return apiFetch("/columns", {
     method: "POST",
-    body: JSON.stringify({ column_id: columnId, title, details }),
+    body: JSON.stringify({ board_id: boardId, title }),
   });
 }
 
-export async function updateCard(cardId: number, updates: { title?: string; details?: string }) {
+export async function deleteColumn(columnId: number) {
+  return apiFetch(`/columns/${columnId}`, { method: "DELETE" });
+}
+
+// Card CRUD
+export async function createCard(
+  columnId: number,
+  title: string,
+  details: string,
+  label: string = "",
+  dueDate: string | null = null,
+) {
+  return apiFetch("/cards", {
+    method: "POST",
+    body: JSON.stringify({ column_id: columnId, title, details, label, due_date: dueDate }),
+  });
+}
+
+export async function updateCard(
+  cardId: number,
+  updates: { title?: string; details?: string; label?: string; due_date?: string | null },
+) {
   return apiFetch(`/cards/${cardId}`, {
     method: "PUT",
     body: JSON.stringify(updates),
@@ -83,9 +145,37 @@ export async function moveCard(cardId: number, targetColumnId: number, position:
   });
 }
 
-export async function aiChat(message: string, conversationHistory: { role: string; content: string }[]) {
+// Search
+export async function searchCards(query: string, boardId?: number) {
+  return apiFetch("/search", {
+    method: "POST",
+    body: JSON.stringify({ query, board_id: boardId }),
+  });
+}
+
+// AI Chat
+export async function aiChat(
+  message: string,
+  conversationHistory: { role: string; content: string }[],
+  boardId?: number,
+) {
   return apiFetch("/ai/chat", {
     method: "POST",
-    body: JSON.stringify({ message, conversation_history: conversationHistory }),
+    body: JSON.stringify({ message, conversation_history: conversationHistory, board_id: boardId }),
+  });
+}
+
+// Profile
+export async function updateProfile(displayName: string) {
+  return apiFetch("/profile", {
+    method: "PUT",
+    body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
+export async function changePassword(oldPassword: string, newPassword: string) {
+  return apiFetch("/profile/password", {
+    method: "PUT",
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
   });
 }

@@ -12,9 +12,10 @@ interface ChatSidebarProps {
   open: boolean;
   onClose: () => void;
   onBoardUpdated: () => void;
+  boardId?: number;
 }
 
-export function ChatSidebar({ open, onClose, onBoardUpdated }: ChatSidebarProps) {
+export function ChatSidebar({ open, onClose, onBoardUpdated, boardId }: ChatSidebarProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -35,7 +36,7 @@ export function ChatSidebar({ open, onClose, onBoardUpdated }: ChatSidebarProps)
     setLoading(true);
 
     try {
-      const data = await api.aiChat(text, history);
+      const data = await api.aiChat(text, history, boardId);
       const assistantMsg: Message = { role: "assistant", content: data.message };
       setMessages((prev) => [...prev, assistantMsg]);
       if (data.board_updates && data.board_updates.length > 0) {

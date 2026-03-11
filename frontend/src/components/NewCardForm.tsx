@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from "react";
 
-const initialFormState = { title: "", details: "" };
+const LABELS = ["", "bug", "feature", "improvement", "task", "docs"];
+
+const initialFormState = { title: "", details: "", label: "", dueDate: "" };
 
 type NewCardFormProps = {
-  onAdd: (title: string, details: string) => void;
+  onAdd: (title: string, details: string, label?: string, dueDate?: string | null) => void;
 };
 
 export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
@@ -15,7 +17,12 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
     if (!formState.title.trim()) {
       return;
     }
-    onAdd(formState.title.trim(), formState.details.trim());
+    onAdd(
+      formState.title.trim(),
+      formState.details.trim(),
+      formState.label || undefined,
+      formState.dueDate || null,
+    );
     setFormState(initialFormState);
     setIsOpen(false);
   };
@@ -42,6 +49,23 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             rows={3}
             className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--primary-blue)]"
           />
+          <div className="flex gap-2">
+            <select
+              value={formState.label}
+              onChange={(e) => setFormState((prev) => ({ ...prev, label: e.target.value }))}
+              className="rounded-xl border border-[var(--stroke)] bg-white px-2 py-2 text-xs text-[var(--gray-text)] outline-none"
+            >
+              {LABELS.map((l) => (
+                <option key={l} value={l}>{l || "No label"}</option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={formState.dueDate}
+              onChange={(e) => setFormState((prev) => ({ ...prev, dueDate: e.target.value }))}
+              className="rounded-xl border border-[var(--stroke)] bg-white px-2 py-2 text-xs text-[var(--gray-text)] outline-none"
+            />
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="submit"

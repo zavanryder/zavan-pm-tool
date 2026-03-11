@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { useDroppable } from "@dnd-kit/core";
@@ -9,9 +11,10 @@ import { NewCardForm } from "@/components/NewCardForm";
 type KanbanColumnProps = {
   column: Column;
   onRename: (columnId: number, title: string) => void;
-  onAddCard: (columnId: number, title: string, details: string) => void;
+  onAddCard: (columnId: number, title: string, details: string, label?: string, dueDate?: string | null) => void;
   onDeleteCard: (columnId: number, cardId: number) => void;
-  onUpdateCard: (cardId: number, title: string, details: string) => void;
+  onUpdateCard: (cardId: number, title: string, details: string, label?: string, dueDate?: string | null) => void;
+  onDeleteColumn: (columnId: number) => void;
 };
 
 export const KanbanColumn = ({
@@ -20,6 +23,7 @@ export const KanbanColumn = ({
   onAddCard,
   onDeleteCard,
   onUpdateCard,
+  onDeleteColumn,
 }: KanbanColumnProps) => {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
   const [localTitle, setLocalTitle] = useState(column.title);
@@ -69,6 +73,15 @@ export const KanbanColumn = ({
             aria-label="Column title"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => onDeleteColumn(column.id)}
+          className="mt-1 rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-red-600"
+          aria-label={`Delete column ${column.title}`}
+          title="Delete column"
+        >
+          x
+        </button>
       </div>
       <div className="mt-4 flex flex-1 flex-col gap-3">
         <SortableContext items={column.cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
@@ -88,7 +101,7 @@ export const KanbanColumn = ({
         )}
       </div>
       <NewCardForm
-        onAdd={(title, details) => onAddCard(column.id, title, details)}
+        onAdd={(title, details, label, dueDate) => onAddCard(column.id, title, details, label, dueDate)}
       />
     </section>
   );

@@ -9,9 +9,11 @@ SQLite database stored at `data/kanban.db`. Created automatically on first start
 |--------|------|-------------|
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT |
 | username | TEXT | NOT NULL, UNIQUE |
-| password_hash | TEXT | NOT NULL |
+| password | TEXT | NOT NULL (sha256 hash) |
+| display_name | TEXT | NOT NULL, DEFAULT '' |
+| created_at | TEXT | NOT NULL, DEFAULT datetime('now') |
 
-Stores user accounts. For the MVP, a single user ("user") is seeded on startup. The password_hash column stores plain text for the MVP but the schema supports hashing for future.
+Stores user accounts. Passwords are sha256-hashed. A default user ("user"/"password") is seeded on startup. Users can self-register.
 
 ### boards
 | Column | Type | Constraints |
@@ -19,29 +21,33 @@ Stores user accounts. For the MVP, a single user ("user") is seeded on startup. 
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT |
 | user_id | INTEGER | NOT NULL, FK -> users(id) |
 | name | TEXT | NOT NULL, DEFAULT 'My Board' |
+| created_at | TEXT | NOT NULL, DEFAULT datetime('now') |
 
-One board per user for the MVP. The schema supports multiple boards per user for future.
+Multiple boards per user. Users can create, rename, and delete boards.
 
 ### columns
 | Column | Type | Constraints |
 |--------|------|-------------|
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT |
-| board_id | INTEGER | NOT NULL, FK -> boards(id) |
+| board_id | INTEGER | NOT NULL, FK -> boards(id) ON DELETE CASCADE |
 | title | TEXT | NOT NULL |
 | position | INTEGER | NOT NULL |
 
-Five columns seeded per board: Backlog (0), Discovery (1), In Progress (2), Review (3), Done (4). Position determines display order.
+Five default columns seeded per new board. Users can add and delete columns dynamically. Deleting a board cascades to its columns and cards.
 
 ### cards
 | Column | Type | Constraints |
 |--------|------|-------------|
 | id | INTEGER | PRIMARY KEY AUTOINCREMENT |
-| column_id | INTEGER | NOT NULL, FK -> columns(id) |
+| column_id | INTEGER | NOT NULL, FK -> columns(id) ON DELETE CASCADE |
 | title | TEXT | NOT NULL |
 | details | TEXT | NOT NULL, DEFAULT '' |
+| label | TEXT | NOT NULL, DEFAULT '' |
+| due_date | TEXT | nullable |
 | position | INTEGER | NOT NULL |
+| created_at | TEXT | NOT NULL, DEFAULT datetime('now') |
 
-Cards belong to a column. Position determines order within the column. Moving a card changes its column_id and position.
+Cards belong to a column. Label is a tag string (bug, feature, improvement, task, docs). Due date is ISO date string or null.
 
 ## Indexes
 
@@ -51,10 +57,8 @@ Cards belong to a column. Position determines order within the column. Moving a 
 
 ## Migration approach
 
-Tables are created with `CREATE TABLE IF NOT EXISTS` on application startup. No migration framework needed for the MVP.
+Tables are created with `CREATE TABLE IF NOT EXISTS` on application startup.
 
 ## Seeding
 
-On first login, if the user has no board:
-1. Create a board for the user
-2. Create 5 default columns (Backlog, Discovery, In Progress, Review, Done)
+On startup, ensures default user ("user"/"password") exists. When a user creates their first board, 5 default columns are seeded (Backlog, Discovery, In Progress, Review, Done).

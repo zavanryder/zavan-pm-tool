@@ -2,6 +2,8 @@ export type Card = {
   id: number;
   title: string;
   details: string;
+  label: string;
+  due_date: string | null;
 };
 
 export type Column = {
@@ -13,7 +15,14 @@ export type Column = {
 
 export type Board = {
   id: number;
+  name: string;
   columns: Column[];
+};
+
+export type BoardSummary = {
+  id: number;
+  name: string;
+  created_at: string;
 };
 
 export function findColumnByCardId(columns: Column[], cardId: number): Column | undefined {
@@ -86,3 +95,11 @@ export function reorderCards(
   });
   return { columns: newColumns, targetColumnId: overColId, position: insertIdx };
 }
+
+export const LABEL_COLORS: Record<string, string> = {
+  bug: "#e74c3c",
+  feature: "#209dd7",
+  improvement: "#ecad0a",
+  task: "#753991",
+  docs: "#888888",
+};

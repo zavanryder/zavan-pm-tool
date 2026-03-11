@@ -3,12 +3,12 @@ import { reorderCards, type Column } from "./kanban";
 
 const makeColumns = (): Column[] => [
   { id: 1, title: "A", position: 0, cards: [
-    { id: 10, title: "Card 1", details: "" },
-    { id: 11, title: "Card 2", details: "" },
-    { id: 12, title: "Card 3", details: "" },
+    { id: 10, title: "Card 1", details: "", label: "", due_date: null },
+    { id: 11, title: "Card 2", details: "", label: "", due_date: null },
+    { id: 12, title: "Card 3", details: "", label: "", due_date: null },
   ]},
   { id: 2, title: "B", position: 1, cards: [
-    { id: 20, title: "Card 4", details: "" },
+    { id: 20, title: "Card 4", details: "", label: "", due_date: null },
   ]},
   { id: 3, title: "C", position: 2, cards: [] },
 ];

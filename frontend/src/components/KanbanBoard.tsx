@@ -19,24 +19,31 @@ import * as api from "@/lib/api";
 
 interface KanbanBoardProps {
   username: string;
+  boardId: number;
   onLogout: () => void;
+  onBack: () => void;
 }
 
-export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
+export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoardProps) => {
   const [board, setBoard] = useState<Board | null>(null);
   const [activeCardId, setActiveCardId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [boardName, setBoardName] = useState("");
+  const [addingColumn, setAddingColumn] = useState(false);
+  const [newColumnTitle, setNewColumnTitle] = useState("");
 
   const loadBoard = useCallback(async () => {
     try {
-      const data = await api.fetchBoard();
+      const data = await api.fetchBoard(boardId);
       setBoard(data);
+      setBoardName(data.name);
       setError(null);
     } catch {
       setError("Failed to load board");
     }
-  }, []);
+  }, [boardId]);
 
   useEffect(() => {
     loadBoard();
@@ -94,9 +101,37 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
     }
   };
 
-  const handleAddCard = async (columnId: number, title: string, details: string) => {
+  const handleDeleteColumn = async (columnId: number) => {
+    if (!board) return;
+    setBoard({
+      ...board,
+      columns: board.columns.filter((col) => col.id !== columnId),
+    });
     try {
-      await api.createCard(columnId, title, details);
+      await api.deleteColumn(columnId);
+    } catch {
+      setError("Failed to delete column");
+      loadBoard();
+    }
+  };
+
+  const handleAddColumn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const title = newColumnTitle.trim();
+    if (!title || !board) return;
+    try {
+      await api.addColumn(boardId, title);
+      setNewColumnTitle("");
+      setAddingColumn(false);
+      await loadBoard();
+    } catch {
+      setError("Failed to add column");
+    }
+  };
+
+  const handleAddCard = async (columnId: number, title: string, details: string, label?: string, dueDate?: string | null) => {
+    try {
+      await api.createCard(columnId, title, details, label, dueDate);
       await loadBoard();
     } catch {
       setError("Failed to add card");
@@ -121,22 +156,38 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
     }
   };
 
-  const handleUpdateCard = async (cardId: number, title: string, details: string) => {
+  const handleUpdateCard = async (cardId: number, title: string, details: string, label?: string, dueDate?: string | null) => {
     if (!board) return;
     setBoard({
       ...board,
       columns: board.columns.map((col) => ({
         ...col,
         cards: col.cards.map((c) =>
-          c.id === cardId ? { ...c, title, details } : c
+          c.id === cardId ? { ...c, title, details, label: label ?? c.label, due_date: dueDate !== undefined ? dueDate : c.due_date } : c
         ),
       })),
     });
     try {
-      await api.updateCard(cardId, { title, details });
+      await api.updateCard(cardId, { title, details, label, due_date: dueDate });
     } catch {
       setError("Failed to update card");
       loadBoard();
+    }
+  };
+
+  const handleRenameBoardBlur = async () => {
+    setEditingName(false);
+    const name = boardName.trim();
+    if (!name || !board || name === board.name) {
+      setBoardName(board?.name || "");
+      return;
+    }
+    try {
+      await api.renameBoard(boardId, name);
+      setBoard({ ...board, name });
+    } catch {
+      setError("Failed to rename board");
+      setBoardName(board.name);
     }
   };
 
@@ -150,7 +201,7 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
     );
   }
 
-  const colCount = board.columns.length;
+  const colCount = board.columns.length + (addingColumn ? 1 : 0);
 
   return (
     <div className="relative overflow-hidden">
@@ -162,26 +213,38 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
           <header className="flex flex-col gap-6 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur">
             <div className="flex flex-wrap items-start justify-between gap-6">
               <div>
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="mb-2 text-xs font-semibold text-[var(--primary-blue)] transition hover:opacity-70"
+                  data-testid="back-button"
+                >
+                  &larr; All Boards
+                </button>
                 <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
-                  Single Board Kanban
+                  Kanban Board
                 </p>
-                <h1 className="mt-3 font-display text-4xl font-semibold text-[var(--navy-dark)]">
-                  Kanban Studio
-                </h1>
-                <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--gray-text)]">
-                  Keep momentum visible. Rename columns, drag cards between stages,
-                  and capture quick notes without getting buried in settings.
-                </p>
+                {editingName ? (
+                  <input
+                    value={boardName}
+                    onChange={(e) => setBoardName(e.target.value)}
+                    onBlur={handleRenameBoardBlur}
+                    onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+                    className="mt-3 w-full bg-transparent font-display text-4xl font-semibold text-[var(--navy-dark)] outline-none"
+                    autoFocus
+                    data-testid="board-name-input"
+                  />
+                ) : (
+                  <h1
+                    className="mt-3 cursor-pointer font-display text-4xl font-semibold text-[var(--navy-dark)]"
+                    onClick={() => setEditingName(true)}
+                    data-testid="board-name"
+                  >
+                    {board.name}
+                  </h1>
+                )}
               </div>
               <div className="flex items-start gap-4">
-                <div className="rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] px-5 py-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-                    Focus
-                  </p>
-                  <p className="mt-2 text-lg font-semibold text-[var(--primary-blue)]">
-                    One board. Five columns. Zero clutter.
-                  </p>
-                </div>
                 <button
                   type="button"
                   onClick={() => setChatOpen(true)}
@@ -215,6 +278,16 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
                   {column.title}
                 </div>
               ))}
+              {!addingColumn && (
+                <button
+                  type="button"
+                  onClick={() => setAddingColumn(true)}
+                  className="rounded-full border border-dashed border-[var(--stroke)] px-4 py-2 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+                  data-testid="add-column-button"
+                >
+                  + Column
+                </button>
+              )}
             </div>
             {error && (
               <div className="flex items-center justify-between rounded-lg bg-red-50 px-4 py-2">
@@ -248,8 +321,41 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
                   onAddCard={handleAddCard}
                   onDeleteCard={handleDeleteCard}
                   onUpdateCard={handleUpdateCard}
+                  onDeleteColumn={handleDeleteColumn}
                 />
               ))}
+              {addingColumn && (
+                <form
+                  onSubmit={handleAddColumn}
+                  className="flex min-h-[520px] flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed border-[var(--stroke)] p-4"
+                  data-testid="add-column-form"
+                >
+                  <input
+                    type="text"
+                    value={newColumnTitle}
+                    onChange={(e) => setNewColumnTitle(e.target.value)}
+                    placeholder="Column title"
+                    autoFocus
+                    className="w-full rounded-xl border border-[var(--stroke)] px-3 py-2 text-sm outline-none focus:border-[var(--primary-blue)]"
+                    data-testid="new-column-title"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      className="rounded-xl bg-[var(--secondary-purple)] px-4 py-2 text-sm font-semibold text-white"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setAddingColumn(false); setNewColumnTitle(""); }}
+                      className="rounded-xl border border-[var(--stroke)] px-3 py-2 text-xs font-semibold text-[var(--gray-text)]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
             </section>
             <DragOverlay>
               {activeCard ? (
@@ -265,6 +371,7 @@ export const KanbanBoard = ({ username, onLogout }: KanbanBoardProps) => {
         open={chatOpen}
         onClose={() => setChatOpen(false)}
         onBoardUpdated={loadBoard}
+        boardId={boardId}
       />
     </div>
   );
