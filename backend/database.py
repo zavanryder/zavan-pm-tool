@@ -19,6 +19,48 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(c["name"] == column for c in cols)
+
+
+def _migrate(conn: sqlite3.Connection):
+    """Migrate old schemas forward. Safe to run repeatedly."""
+    # users: rename password_hash -> password if needed
+    if _column_exists(conn, "users", "password_hash") and not _column_exists(conn, "users", "password"):
+        conn.execute("ALTER TABLE users RENAME COLUMN password_hash TO password")
+
+    # users: add new columns
+    if not _column_exists(conn, "users", "display_name"):
+        conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+    if not _column_exists(conn, "users", "created_at"):
+        conn.execute("ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+
+    # boards: add created_at
+    if not _column_exists(conn, "boards", "created_at"):
+        conn.execute("ALTER TABLE boards ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+
+    # cards: add label, due_date, created_at
+    if not _column_exists(conn, "cards", "label"):
+        conn.execute("ALTER TABLE cards ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+    if not _column_exists(conn, "cards", "due_date"):
+        conn.execute("ALTER TABLE cards ADD COLUMN due_date TEXT")
+    if not _column_exists(conn, "cards", "created_at"):
+        conn.execute("ALTER TABLE cards ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
+
+    # Migrate plain-text passwords to sha256 hashes (old passwords are short plain text)
+    rows = conn.execute("SELECT id, password FROM users").fetchall()
+    for row in rows:
+        pw = row["password"]
+        if len(pw) != 64:  # not already a sha256 hex digest
+            conn.execute(
+                "UPDATE users SET password = ? WHERE id = ?",
+                (sha256(pw.encode()).hexdigest(), row["id"]),
+            )
+
+    conn.commit()
+
+
 def init_db():
     conn = get_conn()
     try:
@@ -58,6 +100,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_cards_column_id ON cards(column_id);
         """
         )
+        _migrate(conn)
     finally:
         conn.close()
 
