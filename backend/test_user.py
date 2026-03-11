@@ -76,6 +76,6 @@ def test_password_hashing():
     try:
         row = conn.execute("SELECT password FROM users WHERE id = ?", (uid,)).fetchone()
         assert row["password"] != "secret"
-        assert len(row["password"]) == 64  # sha256 hex
+        assert row["password"].startswith(f"{database.PASSWORD_SCHEME}$")
     finally:
         conn.close()

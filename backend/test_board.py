@@ -2,6 +2,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+import database
 from main import (
     AddColumnRequest,
     ChatRequest,
@@ -46,6 +47,14 @@ def test_create_board(user_id):
     board = api_create_board(CreateBoardRequest(name="Sprint 1"), user_id=user_id)
     assert board["name"] == "Sprint 1"
     assert len(board["columns"]) == 5
+
+
+def test_create_board_limit_returns_400(user_id, monkeypatch):
+    monkeypatch.setattr(database, "MAX_BOARDS_PER_USER", 1)
+    api_create_board(CreateBoardRequest(name="First"), user_id=user_id)
+    with pytest.raises(HTTPException) as exc:
+        api_create_board(CreateBoardRequest(name="Second"), user_id=user_id)
+    assert exc.value.status_code == 400
 
 
 def test_list_boards(user_id):
@@ -128,6 +137,14 @@ def test_add_column(user_id):
     assert len(updated["columns"]) == 6
 
 
+def test_add_column_limit_returns_400(user_id, monkeypatch):
+    board = api_create_board(CreateBoardRequest(name="Test"), user_id=user_id)
+    monkeypatch.setattr(database, "MAX_COLUMNS_PER_BOARD", len(board["columns"]))
+    with pytest.raises(HTTPException) as exc:
+        api_add_column(AddColumnRequest(board_id=board["id"], title="Overflow"), user_id=user_id)
+    assert exc.value.status_code == 400
+
+
 def test_add_column_invalid_board(user_id):
     with pytest.raises(HTTPException) as exc:
         api_add_column(AddColumnRequest(board_id=9999, title="X"), user_id=user_id)
@@ -181,6 +198,11 @@ def test_create_card_invalid_column(user_id):
     with pytest.raises(HTTPException) as exc:
         api_create_card(CreateCardRequest(column_id=9999, title="X"), user_id=user_id)
     assert exc.value.status_code == 404
+
+
+def test_create_card_rejects_oversized_title():
+    with pytest.raises(ValidationError):
+        CreateCardRequest(column_id=1, title="x" * 201)
 
 
 def test_update_card(user_id):
@@ -313,3 +335,33 @@ def test_ai_chat_invalid_update_payload_returns_502(user_id, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         ai_chat(ChatRequest(message="hello"), user_id=user_id)
     assert exc.value.status_code == 502
+
+
+def test_chat_request_rejects_too_many_history_messages():
+    with pytest.raises(ValidationError):
+        ChatRequest(
+            message="hello",
+            conversation_history=[{"role": "user", "content": "x"} for _ in range(21)],
+        )
+
+
+def test_ai_chat_cannot_mutate_a_different_board(user_id, monkeypatch):
+    board1 = api_create_board(CreateBoardRequest(name="Board 1"), user_id=user_id)
+    board2 = api_create_board(CreateBoardRequest(name="Board 2"), user_id=user_id)
+    other_column_id = board2["columns"][0]["id"]
+
+    monkeypatch.setattr(
+        "ai.chat",
+        lambda _messages: (
+            '{"message":"ok","board_updates":['
+            f'{{"action":"add_card","column_id":{other_column_id},"title":"Cross-board","details":""}}'
+            "]}"),
+    )
+
+    result = ai_chat(ChatRequest(message="add a card", board_id=board1["id"]), user_id=user_id)
+    board1_after = api_get_board(board1["id"], user_id=user_id)
+    board2_after = api_get_board(board2["id"], user_id=user_id)
+
+    assert board1_after["columns"][0]["cards"] == []
+    assert board2_after["columns"][0]["cards"] == []
+    assert "errors" in result

@@ -8,8 +8,8 @@ RUN npm run build
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
-COPY backend/pyproject.toml ./
-RUN uv sync --no-install-project
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN uv sync --locked --no-install-project
 COPY backend/ ./
 COPY --from=frontend-build /app/frontend/out ./static
 EXPOSE 8000

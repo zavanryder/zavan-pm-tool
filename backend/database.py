@@ -1,14 +1,53 @@
+import hmac
+import secrets
 import sqlite3
+from hashlib import pbkdf2_hmac, sha256
 from pathlib import Path
-from hashlib import sha256
 
 DB_PATH = Path(__file__).parent / "data" / "kanban.db"
 
 DEFAULT_COLUMNS = ["Backlog", "Discovery", "In Progress", "Review", "Done"]
+PBKDF2_ITERATIONS = 150_000
+PASSWORD_SCHEME = "pbkdf2_sha256"
+MAX_BOARDS_PER_USER = 25
+MAX_COLUMNS_PER_BOARD = 12
+MAX_CARDS_PER_COLUMN = 200
 
 
 def hash_password(password: str) -> str:
-    return sha256(password.encode()).hexdigest()
+    salt = secrets.token_bytes(16)
+    digest = pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
+    return f"{PASSWORD_SCHEME}${PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def _is_legacy_sha256(password_hash: str) -> bool:
+    if len(password_hash) != 64:
+        return False
+    return all(ch in "0123456789abcdef" for ch in password_hash.lower())
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    if password_hash.startswith(f"{PASSWORD_SCHEME}$"):
+        try:
+            _, iterations, salt_hex, digest_hex = password_hash.split("$", 3)
+            expected = bytes.fromhex(digest_hex)
+            actual = pbkdf2_hmac(
+                "sha256",
+                password.encode(),
+                bytes.fromhex(salt_hex),
+                int(iterations),
+            )
+        except (ValueError, TypeError):
+            return False
+        return hmac.compare_digest(actual, expected)
+
+    # Backwards compatibility for old SHA-256 hashes.
+    if _is_legacy_sha256(password_hash):
+        legacy_hash = sha256(password.encode()).hexdigest()
+        return hmac.compare_digest(password_hash, legacy_hash)
+
+    # Oldest legacy format stored cleartext.
+    return hmac.compare_digest(password_hash, password)
 
 
 def get_conn() -> sqlite3.Connection:
@@ -48,14 +87,14 @@ def _migrate(conn: sqlite3.Connection):
     if not _column_exists(conn, "cards", "created_at"):
         conn.execute("ALTER TABLE cards ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
 
-    # Migrate plain-text passwords to sha256 hashes (old passwords are short plain text)
+    # Migrate old cleartext passwords to the current password scheme.
     rows = conn.execute("SELECT id, password FROM users").fetchall()
     for row in rows:
         pw = row["password"]
-        if len(pw) != 64:  # not already a sha256 hex digest
+        if not pw.startswith(f"{PASSWORD_SCHEME}$") and not _is_legacy_sha256(pw):
             conn.execute(
                 "UPDATE users SET password = ? WHERE id = ?",
-                (sha256(pw.encode()).hexdigest(), row["id"]),
+                (hash_password(pw), row["id"]),
             )
 
     conn.commit()
@@ -132,8 +171,14 @@ def verify_user(username: str, password: str) -> int | None:
         ).fetchone()
         if not row:
             return None
-        if row["password"] != hash_password(password):
+        if not verify_password(password, row["password"]):
             return None
+        if not row["password"].startswith(f"{PASSWORD_SCHEME}$"):
+            conn.execute(
+                "UPDATE users SET password = ? WHERE id = ?",
+                (hash_password(password), row["id"]),
+            )
+            conn.commit()
         return row["id"]
     finally:
         conn.close()
@@ -180,7 +225,7 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
     conn = get_conn()
     try:
         row = conn.execute("SELECT password FROM users WHERE id = ?", (user_id,)).fetchone()
-        if not row or row["password"] != hash_password(old_password):
+        if not row or not verify_password(old_password, row["password"]):
             return False
         conn.execute("UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), user_id))
         conn.commit()
@@ -194,6 +239,12 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
 def create_board(user_id: int, name: str = "My Board") -> int:
     conn = get_conn()
     try:
+        board_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM boards WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()["c"]
+        if board_count >= MAX_BOARDS_PER_USER:
+            raise ValueError("Board limit reached")
         cur = conn.execute("INSERT INTO boards (user_id, name) VALUES (?, ?)", (user_id, name))
         board_id = cur.lastrowid
         for i, title in enumerate(DEFAULT_COLUMNS):
@@ -337,6 +388,12 @@ def add_column(board_id: int, title: str, user_id: int) -> dict | None:
         ).fetchone()
         if not row:
             return None
+        column_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM columns WHERE board_id = ?",
+            (board_id,),
+        ).fetchone()["c"]
+        if column_count >= MAX_COLUMNS_PER_BOARD:
+            raise ValueError("Column limit reached")
         max_pos = conn.execute(
             "SELECT COALESCE(MAX(position), -1) as mp FROM columns WHERE board_id = ?",
             (board_id,),
@@ -389,15 +446,31 @@ def rename_column(column_id: int, title: str, user_id: int) -> bool:
 
 # --- Card management ---
 
-def create_card(column_id: int, title: str, details: str, user_id: int, label: str = "", due_date: str | None = None) -> dict | None:
+def create_card(
+    column_id: int,
+    title: str,
+    details: str,
+    user_id: int,
+    label: str = "",
+    due_date: str | None = None,
+    board_id: int | None = None,
+) -> dict | None:
     conn = get_conn()
     try:
-        row = conn.execute(
-            "SELECT c.id FROM columns c JOIN boards b ON c.board_id = b.id WHERE c.id = ? AND b.user_id = ?",
-            (column_id, user_id),
-        ).fetchone()
+        sql = "SELECT c.id FROM columns c JOIN boards b ON c.board_id = b.id WHERE c.id = ? AND b.user_id = ?"
+        params: list[int] = [column_id, user_id]
+        if board_id is not None:
+            sql += " AND b.id = ?"
+            params.append(board_id)
+        row = conn.execute(sql, params).fetchone()
         if not row:
             return None
+        card_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM cards WHERE column_id = ?",
+            (column_id,),
+        ).fetchone()["c"]
+        if card_count >= MAX_CARDS_PER_COLUMN:
+            raise ValueError("Card limit reached")
         max_pos = conn.execute(
             "SELECT COALESCE(MAX(position), -1) as mp FROM cards WHERE column_id = ?",
             (column_id,),
@@ -413,13 +486,23 @@ def create_card(column_id: int, title: str, details: str, user_id: int, label: s
         conn.close()
 
 
-def update_card(card_id: int, title: str | None, details: str | None, user_id: int, label: str | None = None, due_date: str | None = "UNSET") -> bool:
+def update_card(
+    card_id: int,
+    title: str | None,
+    details: str | None,
+    user_id: int,
+    label: str | None = None,
+    due_date: str | None = "UNSET",
+    board_id: int | None = None,
+) -> bool:
     conn = get_conn()
     try:
-        row = conn.execute(
-            "SELECT ca.id FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?",
-            (card_id, user_id),
-        ).fetchone()
+        sql = "SELECT ca.id FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
+        params: list[int] = [card_id, user_id]
+        if board_id is not None:
+            sql += " AND b.id = ?"
+            params.append(board_id)
+        row = conn.execute(sql, params).fetchone()
         if not row:
             return False
         if title is not None:
@@ -436,13 +519,15 @@ def update_card(card_id: int, title: str | None, details: str | None, user_id: i
         conn.close()
 
 
-def delete_card(card_id: int, user_id: int) -> bool:
+def delete_card(card_id: int, user_id: int, board_id: int | None = None) -> bool:
     conn = get_conn()
     try:
-        row = conn.execute(
-            "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?",
-            (card_id, user_id),
-        ).fetchone()
+        sql = "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
+        params: list[int] = [card_id, user_id]
+        if board_id is not None:
+            sql += " AND b.id = ?"
+            params.append(board_id)
+        row = conn.execute(sql, params).fetchone()
         if not row:
             return False
         conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
@@ -456,23 +541,33 @@ def delete_card(card_id: int, user_id: int) -> bool:
         conn.close()
 
 
-def move_card(card_id: int, target_column_id: int, position: int, user_id: int) -> bool:
+def move_card(
+    card_id: int,
+    target_column_id: int,
+    position: int,
+    user_id: int,
+    board_id: int | None = None,
+) -> bool:
     if position < 0:
         raise ValueError("Position must be >= 0")
 
     conn = get_conn()
     try:
-        card = conn.execute(
-            "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?",
-            (card_id, user_id),
-        ).fetchone()
+        card_sql = "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
+        card_params: list[int] = [card_id, user_id]
+        if board_id is not None:
+            card_sql += " AND b.id = ?"
+            card_params.append(board_id)
+        card = conn.execute(card_sql, card_params).fetchone()
         if not card:
             return False
 
-        target_col = conn.execute(
-            "SELECT co.id FROM columns co JOIN boards b ON co.board_id = b.id WHERE co.id = ? AND b.user_id = ?",
-            (target_column_id, user_id),
-        ).fetchone()
+        target_sql = "SELECT co.id FROM columns co JOIN boards b ON co.board_id = b.id WHERE co.id = ? AND b.user_id = ?"
+        target_params: list[int] = [target_column_id, user_id]
+        if board_id is not None:
+            target_sql += " AND b.id = ?"
+            target_params.append(board_id)
+        target_col = conn.execute(target_sql, target_params).fetchone()
         if not target_col:
             return False
 

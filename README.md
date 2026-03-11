@@ -1,6 +1,6 @@
 # Kanban Studio
 
-A single-board Kanban app with drag-and-drop cards, inline card editing, and an AI chat assistant that can create, move, and update cards via natural language.
+A local Dockerized project management app with multi-board Kanban, auth, search, profile management, and an AI chat assistant that can create, move, update, and delete cards.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ bash scripts/start.sh
 
 3. Open http://localhost:8000 in your browser.
 
-4. Log in with username `user` and password `password`.
+4. Sign in with the seeded account `user` / `password`, or register a new account from the login screen.
 
 To stop:
 
@@ -31,7 +31,7 @@ To stop:
 bash scripts/stop.sh
 ```
 
-Data is persisted in `data/kanban.db` (SQLite). This directory is created automatically on first run.
+Data is persisted in `data/kanban.db` (SQLite). Passwords are stored as salted PBKDF2-SHA256 hashes. Legacy password rows are upgraded automatically on login.
 
 ## AI chat
 
@@ -43,20 +43,12 @@ Click the "AI Chat" button in the top-right corner to open the chat sidebar. You
 - Delete cards: "Delete 'Fix login bug'"
 - Ask questions: "What's in my Review column?"
 
-## Adding users
+## Notes
 
-The MVP has a single hardcoded user (`user` / `password`). To add users, edit `USERS` in `backend/auth.py`:
-
-```python
-USERS = {
-    "user": "password",
-    "alice": "her-password",
-}
-```
-
-Then rebuild: `bash scripts/start.sh`
-
-New users get their own board with default columns (Backlog, Discovery, In Progress, Review, Done) created on first login.
+- The seeded `user` / `password` account is created on backend startup for MVP compatibility.
+- Users can register additional accounts through the app.
+- Each user can create multiple boards.
+- AI chat updates are scoped to the currently opened board.
 
 ## Running tests
 
@@ -72,6 +64,13 @@ Frontend:
 ```bash
 cd frontend
 npm test
+```
+
+Frontend E2E:
+
+```bash
+cd frontend
+npm run test:e2e
 ```
 
 If the backend venv doesn't exist yet, create it first:

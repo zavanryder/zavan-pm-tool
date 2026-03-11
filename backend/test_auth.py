@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 import pytest
 from fastapi import HTTPException
 
@@ -76,6 +78,28 @@ def test_me_with_invalid_token():
     with pytest.raises(HTTPException) as exc:
         get_current_user("Bearer invalid")
     assert exc.value.status_code == 401
+
+
+def test_legacy_sha256_password_is_upgraded_on_login():
+    uid = database.create_user("legacy", "secret")
+    legacy_hash = sha256("secret".encode()).hexdigest()
+    conn = database.get_conn()
+    try:
+        conn.execute("UPDATE users SET password = ? WHERE id = ?", (legacy_hash, uid))
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = login(LoginRequest(username="legacy", password="secret"))
+    assert data.username == "legacy"
+
+    conn = database.get_conn()
+    try:
+        row = conn.execute("SELECT password FROM users WHERE id = ?", (uid,)).fetchone()
+        assert row["password"].startswith(f"{database.PASSWORD_SCHEME}$")
+        assert row["password"] != legacy_hash
+    finally:
+        conn.close()
 
 
 def test_health():

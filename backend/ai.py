@@ -4,6 +4,7 @@ import os
 from openai import OpenAI
 
 MODEL = "openai/gpt-oss-120b"
+MAX_HISTORY_MESSAGES = 20
 
 SYSTEM_PROMPT = """You are an AI assistant for a Kanban board app called Kanban Studio.
 
@@ -55,12 +56,12 @@ def chat(messages: list[dict]) -> str:
 
 
 def build_messages(board: dict, user_message: str, history: list[dict]) -> list[dict]:
-    board_json = json.dumps(board, indent=2)
+    board_json = json.dumps(board, separators=(",", ":"))
     system = SYSTEM_PROMPT.format(board_json=board_json)
     messages = [{"role": "system", "content": system}]
 
     # Ignore forged/invalid history roles to avoid user-provided system prompt injection.
-    for entry in history:
+    for entry in history[-MAX_HISTORY_MESSAGES:]:
         if not isinstance(entry, dict):
             continue
         role = entry.get("role")

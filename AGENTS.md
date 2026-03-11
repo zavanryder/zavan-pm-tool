@@ -1,53 +1,60 @@
 # The Project Management MVP web app
 
-## Business Requirements
+## Current Product State
 
-This project is building a Project Management App. Key features:
-- A user can sign in
-- When signed in, the user sees a Kanban board representing their project
-- The Kanban board has fixed columns that can be renamed
-- The cards on the Kanban board can be moved with drag and drop, and edited
-- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards
+This project is a local-first Project Management app with:
+- Sign in and registration
+- A multi-board Kanban workspace per user
+- Renameable columns
+- Editable cards with drag-and-drop movement
+- Card labels and due dates
+- AI chat in a sidebar that can create, edit, move, and delete cards
+- Search across cards
+- Basic user profile and password change flows
 
-## Limitations
+## Current Limitations
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
-
-For the MVP, there will only be 1 Kanban board per signed in user.
-
-For the MVP, this will run locally (in a docker container)
+- Intended to run locally in Docker
+- A default `user` / `password` account is still seeded for MVP compatibility
+- AI actions are scoped to the currently selected board
+- Data is stored in a local SQLite database
 
 ## Technical Decisions
 
-- NextJS frontend
-- Python FastAPI backend, including serving the static NextJS site at /
+- Next.js frontend
+- Python FastAPI backend, including serving the static Next.js site at `/`
 - Everything packaged into a Docker container
-- Use "uv" as the package manager for python in the Docker container
-- Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
+- Use `uv` as the Python package manager in Docker
+- Use OpenRouter for AI calls; `OPENROUTER_API_KEY` is loaded from `.env`
 - Use `openai/gpt-oss-120b` as the model
-- Use SQLLite local database for the database, creating a new db if it doesn't exist
-- Start and Stop server scripts for Linux in scripts/
+- Use SQLite local database, creating a new DB if it does not exist
+- Passwords are stored as salted PBKDF2-SHA256 hashes; legacy hashes are upgraded on login
+- Start and stop server scripts for Linux live in `scripts/`
 
-## Starting Point
+## Architecture Notes
 
-A working MVP of the frontend has been built and is already in frontend. This is not yet designed for the Docker setup. It's a pure frontend-only demo.
+- The frontend is no longer a standalone demo; it talks to the FastAPI backend for auth, boards, cards, search, AI chat, and profile operations.
+- The app supports multiple boards per user.
+- The backend enforces ownership checks on board, column, and card operations.
+- AI chat responses are parsed as structured updates and applied only within the requested board.
+- Request payloads have explicit length limits to control storage growth and AI prompt size.
 
 ## Color Scheme
 
-- Accent Yellow: `#ecad0a` - accent lines, highlights
-- Blue Primary: `#209dd7` - links, key sections
-- Purple Secondary: `#753991` - submit buttons, important actions
-- Dark Navy: `#032147` - main headings
-- Gray Text: `#888888` - supporting text, labels
+- Accent Yellow: `#ecad0a`
+- Blue Primary: `#209dd7`
+- Purple Secondary: `#753991`
+- Dark Navy: `#032147`
+- Gray Text: `#888888`
 
 ## Coding standards
 
-1. Use latest versions of libraries and idiomatic approaches as of today
-2. Keep it simple - NEVER over-engineer, ALWAYS simplify, NO unnecessary defensive programming. No extra features - focus on simplicity.
-3. Be concise. Keep README minimal. IMPORTANT: no emojis ever
-4. When hitting issues, always identify root cause before trying a fix. Do not guess. Prove with evidence, then fix the root cause.
+1. Use current idiomatic library APIs.
+2. Keep it simple. Do not over-engineer.
+3. Be concise. Keep README minimal. No emojis.
+4. Fix root causes, not symptoms. Prove the issue before changing code.
 
 ## Working documentation
 
-All documents for planning and executing this project will be in the docs/ directory.
-Please review the docs/PLAN.md document before proceeding.
+All planning and execution documents live in `docs/`.
+Review `docs/PLAN.md` before making substantial changes.

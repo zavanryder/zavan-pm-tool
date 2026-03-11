@@ -5,9 +5,19 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 logger = logging.getLogger(__name__)
+
+MAX_NAME_LENGTH = 100
+MAX_TITLE_LENGTH = 200
+MAX_DETAILS_LENGTH = 4_000
+MAX_LABEL_LENGTH = 32
+MAX_SEARCH_QUERY_LENGTH = 200
+MAX_CHAT_MESSAGE_LENGTH = 2_000
+MAX_CHAT_HISTORY_MESSAGES = 20
+MAX_CHAT_HISTORY_CONTENT_LENGTH = 2_000
+ISO_DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
 
 from auth import get_current_user, router as auth_router
 from database import (
@@ -65,18 +75,25 @@ def api_list_boards(user_id: int = Depends(get_user_id)):
 
 
 class CreateBoardRequest(BaseModel):
-    name: str = "My Board"
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(default="My Board", min_length=1, max_length=MAX_NAME_LENGTH)
 
 
 @app.post("/api/boards")
 def api_create_board(req: CreateBoardRequest, user_id: int = Depends(get_user_id)):
-    board_id = create_board(user_id, req.name)
+    try:
+        board_id = create_board(user_id, req.name)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
     board = get_board(board_id, user_id)
     return board
 
 
 class RenameBoardRequest(BaseModel):
-    name: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
 
 
 @app.put("/api/boards/{board_id}")
@@ -110,7 +127,9 @@ def read_board(user_id: int = Depends(get_user_id)):
 # --- Column management ---
 
 class RenameColumnRequest(BaseModel):
-    title: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
 
 
 @app.put("/api/columns/{column_id}")
@@ -121,13 +140,18 @@ def api_rename_column(column_id: int, req: RenameColumnRequest, user_id: int = D
 
 
 class AddColumnRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     board_id: int
-    title: str
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
 
 
 @app.post("/api/columns")
 def api_add_column(req: AddColumnRequest, user_id: int = Depends(get_user_id)):
-    col = add_column(req.board_id, req.title, user_id)
+    try:
+        col = add_column(req.board_id, req.title, user_id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
     if not col:
         raise HTTPException(status_code=404, detail="Board not found")
     return col
@@ -143,26 +167,33 @@ def api_delete_column(column_id: int, user_id: int = Depends(get_user_id)):
 # --- Card CRUD ---
 
 class CreateCardRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     column_id: int
-    title: str
-    details: str = ""
-    label: str = ""
-    due_date: str | None = None
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
+    details: str = Field(default="", max_length=MAX_DETAILS_LENGTH)
+    label: str = Field(default="", max_length=MAX_LABEL_LENGTH)
+    due_date: str | None = Field(default=None, pattern=ISO_DATE_PATTERN)
 
 
 @app.post("/api/cards")
 def api_create_card(req: CreateCardRequest, user_id: int = Depends(get_user_id)):
-    card = create_card(req.column_id, req.title, req.details, user_id, req.label, req.due_date)
+    try:
+        card = create_card(req.column_id, req.title, req.details, user_id, req.label, req.due_date)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
     if not card:
         raise HTTPException(status_code=404, detail="Column not found")
     return card
 
 
 class UpdateCardRequest(BaseModel):
-    title: str | None = None
-    details: str | None = None
-    label: str | None = None
-    due_date: str | None = "UNSET"
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str | None = Field(default=None, min_length=1, max_length=MAX_TITLE_LENGTH)
+    details: str | None = Field(default=None, max_length=MAX_DETAILS_LENGTH)
+    label: str | None = Field(default=None, max_length=MAX_LABEL_LENGTH)
+    due_date: str | None = Field(default="UNSET", pattern=f"^(UNSET|{ISO_DATE_PATTERN[1:-1]})$")
 
 
 @app.put("/api/cards/{card_id}")
@@ -200,7 +231,9 @@ def api_move_card(card_id: int, req: MoveCardRequest, user_id: int = Depends(get
 # --- Search ---
 
 class SearchRequest(BaseModel):
-    query: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    query: str = Field(min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH)
     board_id: int | None = None
 
 
@@ -212,7 +245,9 @@ def api_search(req: SearchRequest, user_id: int = Depends(get_user_id)):
 # --- User profile ---
 
 class UpdateProfileRequest(BaseModel):
-    display_name: str | None = None
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    display_name: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
 
 
 @app.put("/api/profile")
@@ -222,8 +257,8 @@ def api_update_profile(req: UpdateProfileRequest, user_id: int = Depends(get_use
 
 
 class ChangePasswordRequest(BaseModel):
-    old_password: str
-    new_password: str
+    old_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
 
 
 @app.put("/api/profile/password")
@@ -238,28 +273,35 @@ def api_change_password(req: ChangePasswordRequest, user_id: int = Depends(get_u
 # --- AI Chat ---
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     role: Literal["user", "assistant"]
-    content: str
+    content: str = Field(min_length=1, max_length=MAX_CHAT_HISTORY_CONTENT_LENGTH)
 
 
 class ChatRequest(BaseModel):
-    message: str
-    conversation_history: list[ChatMessage] = Field(default_factory=list)
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    message: str = Field(min_length=1, max_length=MAX_CHAT_MESSAGE_LENGTH)
+    conversation_history: list[ChatMessage] = Field(
+        default_factory=list,
+        max_length=MAX_CHAT_HISTORY_MESSAGES,
+    )
     board_id: int | None = None
 
 
 class AddCardUpdate(BaseModel):
     action: Literal["add_card"]
     column_id: int
-    title: str
-    details: str = ""
+    title: str = Field(min_length=1, max_length=MAX_TITLE_LENGTH)
+    details: str = Field(default="", max_length=MAX_DETAILS_LENGTH)
 
 
 class UpdateCardUpdate(BaseModel):
     action: Literal["update_card"]
     card_id: int
-    title: str | None = None
-    details: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=MAX_TITLE_LENGTH)
+    details: str | None = Field(default=None, max_length=MAX_DETAILS_LENGTH)
 
 
 class MoveCardUpdate(BaseModel):
@@ -308,16 +350,47 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
     errors: list[str] = []
     for update in updates:
         if isinstance(update, AddCardUpdate):
-            create_card(update.column_id, update.title, update.details, user_id)
+            try:
+                created = create_card(
+                    update.column_id,
+                    update.title,
+                    update.details,
+                    user_id,
+                    board_id=board["id"],
+                )
+            except ValueError as err:
+                errors.append(str(err))
+                continue
+            if not created:
+                errors.append("AI update referenced a different board")
         elif isinstance(update, UpdateCardUpdate):
-            update_card(update.card_id, update.title, update.details, user_id)
+            updated = update_card(
+                update.card_id,
+                update.title,
+                update.details,
+                user_id,
+                board_id=board["id"],
+            )
+            if not updated:
+                errors.append("AI update referenced a different board")
         elif isinstance(update, MoveCardUpdate):
             try:
-                move_card(update.card_id, update.target_column_id, update.position, user_id)
+                moved = move_card(
+                    update.card_id,
+                    update.target_column_id,
+                    update.position,
+                    user_id,
+                    board_id=board["id"],
+                )
             except ValueError as e:
                 errors.append(str(e))
+                continue
+            if not moved:
+                errors.append("AI update referenced a different board")
         elif isinstance(update, DeleteCardUpdate):
-            delete_card(update.card_id, user_id)
+            deleted = delete_card(update.card_id, user_id, board_id=board["id"])
+            if not deleted:
+                errors.append("AI update referenced a different board")
 
     if req.board_id:
         updated_board = get_board(req.board_id, user_id)
