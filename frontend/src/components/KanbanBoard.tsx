@@ -73,7 +73,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
     setActiveCardId(null);
     if (!over || !board || active.id === over.id) return;
 
-    const result = reorderCards(board.columns, active.id as number, over.id as number);
+    const result = reorderCards(board.columns, active.id as number, over.id);
     if (!result) return;
 
     setBoard({ ...board, columns: result.columns });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reorderCards, type Column } from "./kanban";
+import { reorderCards, columnDndId, type Column } from "./kanban";
 
 const makeColumns = (): Column[] => [
   { id: 1, title: "A", position: 0, cards: [
@@ -34,7 +34,7 @@ describe("reorderCards", () => {
   });
 
   it("drops to an empty column", () => {
-    const result = reorderCards(makeColumns(), 10, 3);
+    const result = reorderCards(makeColumns(), 10, columnDndId(3));
     expect(result).not.toBeNull();
     const colA = result!.columns.find((c) => c.id === 1)!;
     const colC = result!.columns.find((c) => c.id === 3)!;

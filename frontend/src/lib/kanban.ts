@@ -25,23 +25,31 @@ export type BoardSummary = {
   created_at: string;
 };
 
+export function columnDndId(columnId: number): string {
+  return `col-${columnId}`;
+}
+
+export function parseColumnDndId(dndId: string | number): number | null {
+  if (typeof dndId === "string" && dndId.startsWith("col-")) {
+    return Number(dndId.slice(4));
+  }
+  return null;
+}
+
 export function findColumnByCardId(columns: Column[], cardId: number): Column | undefined {
   return columns.find((col) => col.cards.some((c) => c.id === cardId));
 }
 
-export function isColumnId(columns: Column[], id: number): boolean {
-  return columns.some((col) => col.id === id);
-}
-
-export function findContainerId(columns: Column[], id: number): number | undefined {
-  if (isColumnId(columns, id)) return id;
-  return findColumnByCardId(columns, id)?.id;
+export function findContainerId(columns: Column[], dndId: string | number): number | undefined {
+  const colId = parseColumnDndId(dndId);
+  if (colId !== null) return colId;
+  return findColumnByCardId(columns, dndId as number)?.id;
 }
 
 export function reorderCards(
   columns: Column[],
   activeId: number,
-  overId: number,
+  overId: string | number,
 ): { columns: Column[]; targetColumnId: number; position: number } | null {
   const activeColId = findContainerId(columns, activeId);
   const overColId = findContainerId(columns, overId);
@@ -49,7 +57,7 @@ export function reorderCards(
 
   const activeCol = columns.find((c) => c.id === activeColId)!;
   const overCol = columns.find((c) => c.id === overColId)!;
-  const isOverCol = isColumnId(columns, overId);
+  const isOverCol = parseColumnDndId(overId) !== null;
 
   if (activeColId === overColId) {
     const oldIdx = activeCol.cards.findIndex((c) => c.id === activeId);
