@@ -11,6 +11,6 @@ def user_id(tmp_path):
 
 
 @pytest.fixture
-def second_user_id(tmp_path):
-    """Second user for isolation tests. Requires user_id fixture to init db first."""
+def second_user_id(user_id):
+    """Second user for isolation tests."""
     return database.create_user("user2", "password2")

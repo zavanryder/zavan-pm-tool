@@ -1,6 +1,7 @@
 import hmac
 import secrets
 import sqlite3
+from contextlib import contextmanager
 from hashlib import pbkdf2_hmac, sha256
 from pathlib import Path
 
@@ -23,7 +24,11 @@ def hash_password(password: str) -> str:
 def _is_legacy_sha256(password_hash: str) -> bool:
     if len(password_hash) != 64:
         return False
-    return all(ch in "0123456789abcdef" for ch in password_hash.lower())
+    try:
+        bytes.fromhex(password_hash)
+        return True
+    except ValueError:
+        return False
 
 
 def verify_password(password: str, password_hash: str) -> bool:
@@ -41,13 +46,11 @@ def verify_password(password: str, password_hash: str) -> bool:
             return False
         return hmac.compare_digest(actual, expected)
 
-    # Backwards compatibility for old SHA-256 hashes.
     if _is_legacy_sha256(password_hash):
         legacy_hash = sha256(password.encode()).hexdigest()
         return hmac.compare_digest(password_hash, legacy_hash)
 
-    # Oldest legacy format stored cleartext.
-    return hmac.compare_digest(password_hash, password)
+    return False
 
 
 def get_conn() -> sqlite3.Connection:
@@ -58,7 +61,21 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _connect():
+    conn = get_conn()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+_KNOWN_TABLES = frozenset({"users", "boards", "columns", "cards"})
+
+
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    if table not in _KNOWN_TABLES:
+        raise ValueError(f"Unknown table: {table}")
     cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(c["name"] == column for c in cols)
 
@@ -101,8 +118,7 @@ def _migrate(conn: sqlite3.Connection):
 
 
 def init_db():
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -140,15 +156,12 @@ def init_db():
         """
         )
         _migrate(conn)
-    finally:
-        conn.close()
 
 
 # --- User management ---
 
 def create_user(username: str, password: str, display_name: str = "") -> int | None:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         existing = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
         if existing:
             return None
@@ -159,13 +172,10 @@ def create_user(username: str, password: str, display_name: str = "") -> int | N
         user_id = cur.lastrowid
         conn.commit()
         return user_id
-    finally:
-        conn.close()
 
 
 def verify_user(username: str, password: str) -> int | None:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT id, password FROM users WHERE username = ?", (username,)
         ).fetchone()
@@ -180,8 +190,6 @@ def verify_user(username: str, password: str) -> int | None:
             )
             conn.commit()
         return row["id"]
-    finally:
-        conn.close()
 
 
 def ensure_user(username: str, password: str) -> int:
@@ -197,48 +205,36 @@ def ensure_user(username: str, password: str) -> int:
 
 
 def get_user_by_id(user_id: int) -> dict | None:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT id, username, display_name, created_at FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
-        if not row:
-            return None
-        return dict(row)
-    finally:
-        conn.close()
+        return dict(row) if row else None
 
 
 def update_user_profile(user_id: int, display_name: str | None = None) -> bool:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         if display_name is not None:
             conn.execute("UPDATE users SET display_name = ? WHERE id = ?", (display_name, user_id))
             conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def change_password(user_id: int, old_password: str, new_password: str) -> bool:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute("SELECT password FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row or not verify_password(old_password, row["password"]):
             return False
         conn.execute("UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), user_id))
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 # --- Board management ---
 
 def create_board(user_id: int, name: str = "My Board") -> int:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         board_count = conn.execute(
             "SELECT COUNT(*) AS c FROM boards WHERE user_id = ?",
             (user_id,),
@@ -254,25 +250,19 @@ def create_board(user_id: int, name: str = "My Board") -> int:
             )
         conn.commit()
         return board_id
-    finally:
-        conn.close()
 
 
 def list_boards(user_id: int) -> list[dict]:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         rows = conn.execute(
             "SELECT id, name, created_at FROM boards WHERE user_id = ? ORDER BY created_at",
             (user_id,),
         ).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def rename_board(board_id: int, name: str, user_id: int) -> bool:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT id FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
         ).fetchone()
@@ -281,13 +271,10 @@ def rename_board(board_id: int, name: str, user_id: int) -> bool:
         conn.execute("UPDATE boards SET name = ? WHERE id = ?", (name, board_id))
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def delete_board(board_id: int, user_id: int) -> bool:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT id FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
         ).fetchone()
@@ -296,25 +283,19 @@ def delete_board(board_id: int, user_id: int) -> bool:
         conn.execute("DELETE FROM boards WHERE id = ?", (board_id,))
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def ensure_board(user_id: int) -> int:
     """Legacy helper: get first board or create default."""
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute("SELECT id FROM boards WHERE user_id = ?", (user_id,)).fetchone()
         if row:
             return row["id"]
-    finally:
-        conn.close()
     return create_board(user_id)
 
 
 def get_board(board_id: int, user_id: int) -> dict | None:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         board_row = conn.execute(
             "SELECT id, name FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
         ).fetchone()
@@ -367,8 +348,6 @@ def get_board(board_id: int, user_id: int) -> dict | None:
                 )
 
         return {"id": board_id, "name": board_row["name"], "columns": columns}
-    finally:
-        conn.close()
 
 
 def get_default_board(user_id: int) -> dict:
@@ -381,8 +360,7 @@ def get_default_board(user_id: int) -> dict:
 # --- Column management ---
 
 def add_column(board_id: int, title: str, user_id: int) -> dict | None:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT id FROM boards WHERE id = ? AND user_id = ?", (board_id, user_id)
         ).fetchone()
@@ -404,13 +382,10 @@ def add_column(board_id: int, title: str, user_id: int) -> dict | None:
         )
         conn.commit()
         return {"id": cur.lastrowid, "title": title, "position": max_pos + 1, "cards": []}
-    finally:
-        conn.close()
 
 
 def delete_column(column_id: int, user_id: int) -> bool:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT c.id, c.board_id, c.position FROM columns c JOIN boards b ON c.board_id = b.id WHERE c.id = ? AND b.user_id = ?",
             (column_id, user_id),
@@ -424,13 +399,10 @@ def delete_column(column_id: int, user_id: int) -> bool:
         )
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def rename_column(column_id: int, title: str, user_id: int) -> bool:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
         row = conn.execute(
             "SELECT c.id FROM columns c JOIN boards b ON c.board_id = b.id WHERE c.id = ? AND b.user_id = ?",
             (column_id, user_id),
@@ -440,11 +412,29 @@ def rename_column(column_id: int, title: str, user_id: int) -> bool:
         conn.execute("UPDATE columns SET title = ? WHERE id = ?", (title, column_id))
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 # --- Card management ---
+
+def _check_column_ownership(conn, column_id: int, user_id: int, board_id: int | None = None):
+    """Return the column row if the user owns it, else None."""
+    sql = "SELECT c.id FROM columns c JOIN boards b ON c.board_id = b.id WHERE c.id = ? AND b.user_id = ?"
+    params: list[int] = [column_id, user_id]
+    if board_id is not None:
+        sql += " AND b.id = ?"
+        params.append(board_id)
+    return conn.execute(sql, params).fetchone()
+
+
+def _check_card_ownership(conn, card_id: int, user_id: int, board_id: int | None = None):
+    """Return the card row if the user owns it, else None."""
+    sql = "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
+    params: list[int] = [card_id, user_id]
+    if board_id is not None:
+        sql += " AND b.id = ?"
+        params.append(board_id)
+    return conn.execute(sql, params).fetchone()
+
 
 def create_card(
     column_id: int,
@@ -455,15 +445,8 @@ def create_card(
     due_date: str | None = None,
     board_id: int | None = None,
 ) -> dict | None:
-    conn = get_conn()
-    try:
-        sql = "SELECT c.id FROM columns c JOIN boards b ON c.board_id = b.id WHERE c.id = ? AND b.user_id = ?"
-        params: list[int] = [column_id, user_id]
-        if board_id is not None:
-            sql += " AND b.id = ?"
-            params.append(board_id)
-        row = conn.execute(sql, params).fetchone()
-        if not row:
+    with _connect() as conn:
+        if not _check_column_ownership(conn, column_id, user_id, board_id):
             return None
         card_count = conn.execute(
             "SELECT COUNT(*) AS c FROM cards WHERE column_id = ?",
@@ -482,8 +465,6 @@ def create_card(
         card_id = cur.lastrowid
         conn.commit()
         return {"id": card_id, "title": title, "details": details, "label": label, "due_date": due_date}
-    finally:
-        conn.close()
 
 
 def update_card(
@@ -495,39 +476,33 @@ def update_card(
     due_date: str | None = "UNSET",
     board_id: int | None = None,
 ) -> bool:
-    conn = get_conn()
-    try:
-        sql = "SELECT ca.id FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
-        params: list[int] = [card_id, user_id]
-        if board_id is not None:
-            sql += " AND b.id = ?"
-            params.append(board_id)
-        row = conn.execute(sql, params).fetchone()
-        if not row:
+    with _connect() as conn:
+        if not _check_card_ownership(conn, card_id, user_id, board_id):
             return False
+        sets: list[str] = []
+        vals: list = []
         if title is not None:
-            conn.execute("UPDATE cards SET title = ? WHERE id = ?", (title, card_id))
+            sets.append("title = ?")
+            vals.append(title)
         if details is not None:
-            conn.execute("UPDATE cards SET details = ? WHERE id = ?", (details, card_id))
+            sets.append("details = ?")
+            vals.append(details)
         if label is not None:
-            conn.execute("UPDATE cards SET label = ? WHERE id = ?", (label, card_id))
+            sets.append("label = ?")
+            vals.append(label)
         if due_date != "UNSET":
-            conn.execute("UPDATE cards SET due_date = ? WHERE id = ?", (due_date, card_id))
-        conn.commit()
+            sets.append("due_date = ?")
+            vals.append(due_date)
+        if sets:
+            vals.append(card_id)
+            conn.execute(f"UPDATE cards SET {', '.join(sets)} WHERE id = ?", vals)
+            conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def delete_card(card_id: int, user_id: int, board_id: int | None = None) -> bool:
-    conn = get_conn()
-    try:
-        sql = "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
-        params: list[int] = [card_id, user_id]
-        if board_id is not None:
-            sql += " AND b.id = ?"
-            params.append(board_id)
-        row = conn.execute(sql, params).fetchone()
+    with _connect() as conn:
+        row = _check_card_ownership(conn, card_id, user_id, board_id)
         if not row:
             return False
         conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
@@ -537,8 +512,6 @@ def delete_card(card_id: int, user_id: int, board_id: int | None = None) -> bool
         )
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def move_card(
@@ -551,24 +524,12 @@ def move_card(
     if position < 0:
         raise ValueError("Position must be >= 0")
 
-    conn = get_conn()
-    try:
-        card_sql = "SELECT ca.id, ca.column_id, ca.position FROM cards ca JOIN columns co ON ca.column_id = co.id JOIN boards b ON co.board_id = b.id WHERE ca.id = ? AND b.user_id = ?"
-        card_params: list[int] = [card_id, user_id]
-        if board_id is not None:
-            card_sql += " AND b.id = ?"
-            card_params.append(board_id)
-        card = conn.execute(card_sql, card_params).fetchone()
+    with _connect() as conn:
+        card = _check_card_ownership(conn, card_id, user_id, board_id)
         if not card:
             return False
 
-        target_sql = "SELECT co.id FROM columns co JOIN boards b ON co.board_id = b.id WHERE co.id = ? AND b.user_id = ?"
-        target_params: list[int] = [target_column_id, user_id]
-        if board_id is not None:
-            target_sql += " AND b.id = ?"
-            target_params.append(board_id)
-        target_col = conn.execute(target_sql, target_params).fetchone()
-        if not target_col:
+        if not _check_column_ownership(conn, target_column_id, user_id, board_id):
             return False
 
         old_col_id = card["column_id"]
@@ -588,7 +549,6 @@ def move_card(
             "UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ?",
             (old_col_id, old_pos),
         )
-
         conn.execute(
             "UPDATE cards SET position = position + 1 WHERE column_id = ? AND position >= ?",
             (target_column_id, normalized_pos),
@@ -599,27 +559,23 @@ def move_card(
         )
         conn.commit()
         return True
-    finally:
-        conn.close()
 
 
 def search_cards(user_id: int, query: str, board_id: int | None = None) -> list[dict]:
-    conn = get_conn()
-    try:
+    with _connect() as conn:
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         sql = """
             SELECT ca.id, ca.title, ca.details, ca.label, ca.due_date,
                    co.title AS column_title, b.name AS board_name, b.id AS board_id
             FROM cards ca
             JOIN columns co ON ca.column_id = co.id
             JOIN boards b ON co.board_id = b.id
-            WHERE b.user_id = ? AND (ca.title LIKE ? OR ca.details LIKE ?)
+            WHERE b.user_id = ? AND (ca.title LIKE ? ESCAPE '\\' OR ca.details LIKE ? ESCAPE '\\')
         """
-        params: list = [user_id, f"%{query}%", f"%{query}%"]
+        params: list = [user_id, f"%{escaped}%", f"%{escaped}%"]
         if board_id is not None:
             sql += " AND b.id = ?"
             params.append(board_id)
         sql += " ORDER BY ca.title LIMIT 50"
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()

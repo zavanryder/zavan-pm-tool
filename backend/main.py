@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -51,6 +52,12 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(auth_router)
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -86,8 +93,7 @@ def api_create_board(req: CreateBoardRequest, user_id: int = Depends(get_user_id
         board_id = create_board(user_id, req.name)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
-    board = get_board(board_id, user_id)
-    return board
+    return get_board(board_id, user_id)
 
 
 class RenameBoardRequest(BaseModel):
@@ -193,12 +199,13 @@ class UpdateCardRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=MAX_TITLE_LENGTH)
     details: str | None = Field(default=None, max_length=MAX_DETAILS_LENGTH)
     label: str | None = Field(default=None, max_length=MAX_LABEL_LENGTH)
-    due_date: str | None = Field(default="UNSET", pattern=f"^(UNSET|{ISO_DATE_PATTERN[1:-1]})$")
+    due_date: str | None = Field(default=None, pattern=ISO_DATE_PATTERN)
 
 
 @app.put("/api/cards/{card_id}")
 def api_update_card(card_id: int, req: UpdateCardRequest, user_id: int = Depends(get_user_id)):
-    if not update_card(card_id, req.title, req.details, user_id, req.label, req.due_date):
+    due_date = req.due_date if "due_date" in req.model_fields_set else "UNSET"
+    if not update_card(card_id, req.title, req.details, user_id, req.label, due_date):
         raise HTTPException(status_code=404, detail="Card not found")
     return {"ok": True}
 
@@ -320,16 +327,44 @@ BoardUpdate = AddCardUpdate | UpdateCardUpdate | MoveCardUpdate | DeleteCardUpda
 BOARD_UPDATE_ADAPTER = TypeAdapter(list[BoardUpdate])
 
 
+def _resolve_board(board_id: int | None, user_id: int) -> dict:
+    """Fetch a specific board or the user's default board."""
+    if board_id is not None:
+        board = get_board(board_id, user_id)
+        if not board:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return board
+    return get_default_board(user_id)
+
+
+def _apply_board_update(update: BoardUpdate, user_id: int, board_id: int) -> str | None:
+    """Apply a single AI board update. Return an error string on failure, else None."""
+    if isinstance(update, AddCardUpdate):
+        try:
+            if not create_card(update.column_id, update.title, update.details, user_id, board_id=board_id):
+                return "AI update referenced a different board"
+        except ValueError as err:
+            return str(err)
+    elif isinstance(update, UpdateCardUpdate):
+        if not update_card(update.card_id, update.title, update.details, user_id, board_id=board_id):
+            return "AI update referenced a different board"
+    elif isinstance(update, MoveCardUpdate):
+        try:
+            if not move_card(update.card_id, update.target_column_id, update.position, user_id, board_id=board_id):
+                return "AI update referenced a different board"
+        except ValueError as err:
+            return str(err)
+    elif isinstance(update, DeleteCardUpdate):
+        if not delete_card(update.card_id, user_id, board_id=board_id):
+            return "AI update referenced a different board"
+    return None
+
+
 @app.post("/api/ai/chat")
 def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
     from ai import build_messages, chat, parse_response
 
-    if req.board_id:
-        board = get_board(req.board_id, user_id)
-        if not board:
-            raise HTTPException(status_code=404, detail="Board not found")
-    else:
-        board = get_default_board(user_id)
+    board = _resolve_board(req.board_id, user_id)
 
     history = [item.model_dump() for item in req.conversation_history]
     messages = build_messages(board, req.message, history)
@@ -338,69 +373,21 @@ def ai_chat(req: ChatRequest, user_id: int = Depends(get_user_id)):
         raw = chat(messages)
     except Exception as exc:
         logger.exception("AI chat request failed")
-        raise HTTPException(status_code=502, detail="AI service unavailable") from exc
+        raise HTTPException(status_code=502, detail="AI service unavailable") from None
 
     result = parse_response(raw)
 
     try:
         updates = BOARD_UPDATE_ADAPTER.validate_python(result.get("board_updates", []))
-    except ValidationError as err:
-        raise HTTPException(status_code=502, detail="Invalid AI board update payload") from err
+    except ValidationError:
+        raise HTTPException(status_code=502, detail="Invalid AI board update payload") from None
 
-    errors: list[str] = []
-    for update in updates:
-        if isinstance(update, AddCardUpdate):
-            try:
-                created = create_card(
-                    update.column_id,
-                    update.title,
-                    update.details,
-                    user_id,
-                    board_id=board["id"],
-                )
-            except ValueError as err:
-                errors.append(str(err))
-                continue
-            if not created:
-                errors.append("AI update referenced a different board")
-        elif isinstance(update, UpdateCardUpdate):
-            updated = update_card(
-                update.card_id,
-                update.title,
-                update.details,
-                user_id,
-                board_id=board["id"],
-            )
-            if not updated:
-                errors.append("AI update referenced a different board")
-        elif isinstance(update, MoveCardUpdate):
-            try:
-                moved = move_card(
-                    update.card_id,
-                    update.target_column_id,
-                    update.position,
-                    user_id,
-                    board_id=board["id"],
-                )
-            except ValueError as e:
-                errors.append(str(e))
-                continue
-            if not moved:
-                errors.append("AI update referenced a different board")
-        elif isinstance(update, DeleteCardUpdate):
-            deleted = delete_card(update.card_id, user_id, board_id=board["id"])
-            if not deleted:
-                errors.append("AI update referenced a different board")
-
-    if req.board_id:
-        updated_board = get_board(req.board_id, user_id)
-    else:
-        updated_board = get_default_board(user_id)
+    errors = [e for u in updates if (e := _apply_board_update(u, user_id, board["id"]))]
 
     response = {
         "message": result["message"],
-        "board_updates": [update.model_dump() for update in updates],
-        "board": updated_board,
+        "board_updates": [u.model_dump() for u in updates],
+        "board": _resolve_board(req.board_id, user_id),
     }
     if errors:
         response["errors"] = errors

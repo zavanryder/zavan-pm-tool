@@ -35,15 +35,22 @@ Always respond with valid JSON. No markdown, no code fences, just raw JSON."""
 ALLOWED_HISTORY_ROLES = {"user", "assistant"}
 
 
+_client: OpenAI | None = None
+
+
 def get_client() -> OpenAI:
+    global _client
+    if _client is not None:
+        return _client
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
-    return OpenAI(
+    _client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
         timeout=60.0,
     )
+    return _client
 
 
 def chat(messages: list[dict]) -> str:

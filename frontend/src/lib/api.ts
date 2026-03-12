@@ -2,11 +2,23 @@ const API_BASE = "/api";
 
 let token: string | null = null;
 
+function loadStoredToken(): string | null {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("auth_token");
+  }
+  return null;
+}
+
 export function setToken(t: string | null) {
   token = t;
+  if (typeof window !== "undefined") {
+    if (t) localStorage.setItem("auth_token", t);
+    else localStorage.removeItem("auth_token");
+  }
 }
 
 export function getToken(): string | null {
+  if (!token) token = loadStoredToken();
   return token;
 }
 
@@ -23,12 +35,13 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   if (options.body) {
     headers["Content-Type"] = "application/json";
   }
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  const currentToken = getToken();
+  if (currentToken) {
+    headers["Authorization"] = `Bearer ${currentToken}`;
   }
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (res.status === 401) {
-    token = null;
+    setToken(null);
     onAuthError?.();
     throw new Error("Session expired");
   }
@@ -44,7 +57,7 @@ export async function login(username: string, password: string) {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-  token = data.token;
+  setToken(data.token);
   return data;
 }
 
@@ -53,12 +66,8 @@ export async function register(username: string, password: string, displayName: 
     method: "POST",
     body: JSON.stringify({ username, password, display_name: displayName }),
   });
-  token = data.token;
+  setToken(data.token);
   return data;
-}
-
-export async function fetchMe() {
-  return apiFetch("/auth/me");
 }
 
 // Board CRUD
@@ -74,7 +83,7 @@ export async function createBoard(name: string) {
 }
 
 export async function fetchBoard(boardId?: number) {
-  if (boardId) {
+  if (boardId !== undefined) {
     return apiFetch(`/boards/${boardId}`);
   }
   return apiFetch("/board");

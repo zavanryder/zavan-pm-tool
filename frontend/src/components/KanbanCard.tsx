@@ -13,7 +13,7 @@ type KanbanCardProps = {
 
 const LABELS = ["", "bug", "feature", "improvement", "task", "docs"];
 
-export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
+export function KanbanCard({ card, onDelete, onUpdate }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
   const [editing, setEditing] = useState(false);
@@ -35,11 +35,15 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
     setEditing(false);
   };
 
-  const handleCancel = () => {
+  const resetEditState = () => {
     setEditTitle(card.title);
     setEditDetails(card.details);
     setEditLabel(card.label);
     setEditDueDate(card.due_date || "");
+  };
+
+  const handleCancel = () => {
+    resetEditState();
     setEditing(false);
   };
 
@@ -129,10 +133,7 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
           <div
             className="flex-1 cursor-pointer"
             onClick={() => {
-              setEditTitle(card.title);
-              setEditDetails(card.details);
-              setEditLabel(card.label);
-              setEditDueDate(card.due_date || "");
+              resetEditState();
               setEditing(true);
             }}
           >
@@ -179,4 +180,4 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
       </div>
     </article>
   );
-};
+}

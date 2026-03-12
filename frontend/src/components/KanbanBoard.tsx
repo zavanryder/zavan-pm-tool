@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -24,10 +24,17 @@ interface KanbanBoardProps {
   onBack: () => void;
 }
 
-export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoardProps) => {
+export function KanbanBoard({ username, boardId, onLogout, onBack }: KanbanBoardProps) {
   const [board, setBoard] = useState<Board | null>(null);
   const [activeCardId, setActiveCardId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ id: number; message: string }[]>([]);
+  const nextErrorId = useRef(0);
+
+  const showError = useCallback((message: string) => {
+    const id = nextErrorId.current++;
+    setErrors((prev) => [...prev, { id, message }]);
+    setTimeout(() => setErrors((prev) => prev.filter((e) => e.id !== id)), 5000);
+  }, []);
   const [chatOpen, setChatOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [boardName, setBoardName] = useState("");
@@ -39,11 +46,10 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
       const data = await api.fetchBoard(boardId);
       setBoard(data);
       setBoardName(data.name);
-      setError(null);
     } catch {
-      setError("Failed to load board");
+      showError("Failed to load board");
     }
-  }, [boardId]);
+  }, [boardId, showError]);
 
   useEffect(() => {
     loadBoard();
@@ -80,7 +86,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
     try {
       await api.moveCard(active.id as number, result.targetColumnId, result.position);
     } catch {
-      setError("Failed to move card");
+      showError("Failed to move card");
       loadBoard();
     }
   };
@@ -96,7 +102,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
     try {
       await api.renameColumn(columnId, title);
     } catch {
-      setError("Failed to rename column");
+      showError("Failed to rename column");
       loadBoard();
     }
   };
@@ -110,7 +116,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
     try {
       await api.deleteColumn(columnId);
     } catch {
-      setError("Failed to delete column");
+      showError("Failed to delete column");
       loadBoard();
     }
   };
@@ -125,7 +131,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
       setAddingColumn(false);
       await loadBoard();
     } catch {
-      setError("Failed to add column");
+      showError("Failed to add column");
     }
   };
 
@@ -134,7 +140,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
       await api.createCard(columnId, title, details, label, dueDate);
       await loadBoard();
     } catch {
-      setError("Failed to add card");
+      showError("Failed to add card");
     }
   };
 
@@ -151,7 +157,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
     try {
       await api.deleteCard(cardId);
     } catch {
-      setError("Failed to delete card");
+      showError("Failed to delete card");
       loadBoard();
     }
   };
@@ -162,15 +168,22 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
       ...board,
       columns: board.columns.map((col) => ({
         ...col,
-        cards: col.cards.map((c) =>
-          c.id === cardId ? { ...c, title, details, label: label ?? c.label, due_date: dueDate !== undefined ? dueDate : c.due_date } : c
-        ),
+        cards: col.cards.map((c) => {
+          if (c.id !== cardId) return c;
+          return {
+            ...c,
+            title,
+            details,
+            label: label ?? c.label,
+            due_date: dueDate !== undefined ? dueDate : c.due_date,
+          };
+        }),
       })),
     });
     try {
       await api.updateCard(cardId, { title, details, label, due_date: dueDate });
     } catch {
-      setError("Failed to update card");
+      showError("Failed to update card");
       loadBoard();
     }
   };
@@ -186,7 +199,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
       await api.renameBoard(boardId, name);
       setBoard({ ...board, name });
     } catch {
-      setError("Failed to rename board");
+      showError("Failed to rename board");
       setBoardName(board.name);
     }
   };
@@ -195,7 +208,7 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-sm text-[var(--gray-text)]">
-          {error || "Loading..."}
+          {errors.length > 0 ? errors[errors.length - 1].message : "Loading..."}
         </p>
       </div>
     );
@@ -289,16 +302,20 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
                 </button>
               )}
             </div>
-            {error && (
-              <div className="flex items-center justify-between rounded-lg bg-red-50 px-4 py-2">
-                <p className="text-sm text-red-600">{error}</p>
-                <button
-                  type="button"
-                  onClick={() => setError(null)}
-                  className="text-xs font-semibold text-red-400 hover:text-red-600"
-                >
-                  Dismiss
-                </button>
+            {errors.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {errors.map((err) => (
+                  <div key={err.id} className="flex items-center justify-between rounded-lg bg-red-50 px-4 py-2">
+                    <p className="text-sm text-red-600">{err.message}</p>
+                    <button
+                      type="button"
+                      onClick={() => setErrors((prev) => prev.filter((e) => e.id !== err.id))}
+                      className="text-xs font-semibold text-red-400 hover:text-red-600"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </header>
@@ -375,4 +392,4 @@ export const KanbanBoard = ({ username, boardId, onLogout, onBack }: KanbanBoard
       />
     </div>
   );
-};
+}

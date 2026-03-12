@@ -8,7 +8,7 @@ type NewCardFormProps = {
   onAdd: (title: string, details: string, label?: string, dueDate?: string | null) => void;
 };
 
-export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
+export function NewCardForm({ onAdd }: NewCardFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
 
@@ -96,4 +96,4 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
       )}
     </div>
   );
-};
+}

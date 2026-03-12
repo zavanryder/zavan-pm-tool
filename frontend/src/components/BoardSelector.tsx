@@ -48,6 +48,7 @@ export function BoardSelector({ username, onSelect, onLogout }: BoardSelectorPro
   };
 
   const handleDelete = async (boardId: number) => {
+    if (!window.confirm("Delete this board and all its cards? This cannot be undone.")) return;
     try {
       await api.deleteBoard(boardId);
       setBoards((prev) => prev.filter((b) => b.id !== boardId));

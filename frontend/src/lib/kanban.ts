@@ -36,11 +36,11 @@ export function parseColumnDndId(dndId: string | number): number | null {
   return null;
 }
 
-export function findColumnByCardId(columns: Column[], cardId: number): Column | undefined {
+function findColumnByCardId(columns: Column[], cardId: number): Column | undefined {
   return columns.find((col) => col.cards.some((c) => c.id === cardId));
 }
 
-export function findContainerId(columns: Column[], dndId: string | number): number | undefined {
+function findContainerId(columns: Column[], dndId: string | number): number | undefined {
   const colId = parseColumnDndId(dndId);
   if (colId !== null) return colId;
   return findColumnByCardId(columns, dndId as number)?.id;

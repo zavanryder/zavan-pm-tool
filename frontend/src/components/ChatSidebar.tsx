@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "@/lib/api";
 
+let nextMsgId = 0;
+
 type Message = {
+  id: number;
   role: "user" | "assistant";
   content: string;
 };
@@ -29,7 +32,7 @@ export function ChatSidebar({ open, onClose, onBoardUpdated, boardId }: ChatSide
     const text = input.trim();
     if (!text || loading) return;
 
-    const userMsg: Message = { role: "user", content: text };
+    const userMsg: Message = { id: nextMsgId++, role: "user", content: text };
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -37,7 +40,7 @@ export function ChatSidebar({ open, onClose, onBoardUpdated, boardId }: ChatSide
 
     try {
       const data = await api.aiChat(text, history, boardId);
-      const assistantMsg: Message = { role: "assistant", content: data.message };
+      const assistantMsg: Message = { id: nextMsgId++, role: "assistant", content: data.message };
       setMessages((prev) => [...prev, assistantMsg]);
       if (data.board_updates && data.board_updates.length > 0) {
         onBoardUpdated();
@@ -45,7 +48,7 @@ export function ChatSidebar({ open, onClose, onBoardUpdated, boardId }: ChatSide
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Something went wrong. Please try again." },
+        { id: nextMsgId++, role: "assistant", content: "Something went wrong. Please try again." },
       ]);
     } finally {
       setLoading(false);
@@ -88,13 +91,13 @@ export function ChatSidebar({ open, onClose, onBoardUpdated, boardId }: ChatSide
             Ask me to create, move, or update cards on your board.
           </p>
         )}
-        {messages.map((msg, i) => (
+        {messages.map((msg) => (
           <div
-            key={i}
+            key={msg.id}
             className={`mb-4 ${msg.role === "user" ? "text-right" : "text-left"}`}
           >
             <div
-              className={`inline-block max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-6 ${
+              className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 ${
                 msg.role === "user"
                   ? "bg-[var(--secondary-purple)] text-white"
                   : "bg-[var(--surface)] text-[var(--navy-dark)]"
